@@ -1,6 +1,31 @@
 #!/bin/bash
 CORE_LABEL=edu.buaa.v6only-core
 CORE_READY="$STATE_DIR/core.ready"
+setup_physical_routes() {
+    local family gateway prefix
+    mkdir -p "$STATE_DIR"
+    for family in inet inet6; do
+        gateway=$(route -n get -"$family" -ifscope "$IFACE" default 2>/dev/null | awk '/gateway:/{print $2}')
+        [[ -n "$gateway" && "$gateway" != link* ]] || continue
+        if [[ "$family" == inet ]]; then prefixes='0.0.0.0/1 128.0.0.0/1'; else prefixes='::/1 8000::/1'; fi
+        for prefix in $prefixes; do
+            # Darwin's interface-bound sockets still need a route at least as
+            # specific as the TUN capture. Scoped entries serve only the bound
+            # physical interface; unbound applications use the TUN entries.
+            route -n add -"$family" -ifscope "$IFACE" -net "$prefix" "$gateway" || return 1
+            printf '%s %s %s %s\n' "$family" "$prefix" "$gateway" "$IFACE" >> "$STATE_DIR/core.routes"
+        done
+    done
+}
+remove_physical_routes() {
+    local family prefix gateway iface failed=0
+    [[ -f "$STATE_DIR/core.routes" ]] || return 0
+    while read -r family prefix gateway iface; do
+        route -n delete -"$family" -ifscope "$iface" -net "$prefix" "$gateway" >/dev/null 2>&1 || failed=1
+    done < "$STATE_DIR/core.routes"
+    [[ $failed == 0 ]] || return 1
+    rm -f "$STATE_DIR/core.routes"
+}
 core_device() { [[ -f "$CORE_READY" ]] || return 0; sed -n 's/.*"device":"\([a-z0-9]*\)".*/\1/p' "$CORE_READY" 2>/dev/null; }
 core_active() {
     local dev
@@ -11,8 +36,16 @@ core_active() {
     [[ "$(route -n get -inet 1.1.1.1 2>/dev/null | awk '/interface:/{print $2}')" == "$dev" ]] || return 1
     [[ "$(route -n get -inet6 2001:4860::8888 2>/dev/null | awk '/interface:/{print $2}')" == "$dev" ]]
 }
+validate_forwarding() {
+    # Check complete DNS/TLS/TCP paths after route activation, not just /health.
+    local url
+    for url in https://gw.buaa.edu.cn/ https://www.bilibili.com/; do
+        curl --noproxy '*' --silent --show-error --head --connect-timeout 5 --max-time 15 "$url" -o /dev/null || return 1
+    done
+}
 stop_core() {
     if launchctl print "system/$CORE_LABEL" >/dev/null 2>&1; then launchctl bootout "system/$CORE_LABEL"; fi
+    remove_physical_routes || return 1
     # Closing the owned utun removes all its routes. No global route/PF flush.
     rm -f "$CORE_READY" "$STATE_DIR/core.plist"
 }
@@ -46,6 +79,7 @@ PLIST
     [[ "$dev" =~ ^utun[0-9]+$ ]] || die '转发核心未就绪。'
     ifconfig "$dev" inet 198.18.0.1 198.18.0.1 netmask 255.255.255.0 up
     ifconfig "$dev" inet6 fd00:198:18::1 prefixlen 64
+    setup_physical_routes
     route -n add -net 0.0.0.0/1 -interface "$dev"
     route -n add -net 128.0.0.0/1 -interface "$dev"
     route -n add -inet6 ::/1 -interface "$dev"

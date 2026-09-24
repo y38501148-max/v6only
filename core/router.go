@@ -21,6 +21,7 @@ type Config struct {
 	Interface       string   `json:"interface"`
 	FamilyTimeoutMS int      `json:"family_timeout_ms"`
 	FakeDNS         bool     `json:"fake_dns"`
+	Generation      int64    `json:"generation"`
 }
 type Flow struct {
 	Host    string    `json:"host"`

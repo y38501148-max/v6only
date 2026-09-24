@@ -65,7 +65,7 @@ public class TunnelSmoke extends Instrumentation {
         if(tcp){try(Socket s=new Socket()){vpn.bindSocket(s);s.connect(new InetSocketAddress("198.18.0.2",53),8000);s.setSoTimeout(8000);
             DataOutputStream out=new DataOutputStream(s.getOutputStream());out.writeShort(wire.length);out.write(wire);out.flush();DataInputStream in=new DataInputStream(s.getInputStream());answer=new byte[in.readUnsignedShort()];in.readFully(answer);}}
         else{try(DatagramSocket s=new DatagramSocket()){vpn.bindSocket(s);s.setSoTimeout(8000);s.send(new DatagramPacket(wire,wire.length,InetAddress.getByName("198.18.0.2"),53));DatagramPacket p=new DatagramPacket(new byte[4096],4096);s.receive(p);answer=java.util.Arrays.copyOf(p.getData(),p.getLength());}}
-        check(answer.length>=wire.length+16 && (answer[3]&15)==0,"DNS answer "+host);
+        check(answer.length>=wire.length+16 && (answer[3]&15)==0,"DNS answer "+host+" tcp="+tcp+" length="+answer.length+" rcode="+(answer[3]&15));
         int n=answer.length;return InetAddress.getByAddress(java.util.Arrays.copyOfRange(answer,n-4,n)).getHostAddress();
     }
     private void await(BooleanSupplier predicate,String name){long end=SystemClock.elapsedRealtime()+12000;while(SystemClock.elapsedRealtime()<end){if(predicate.getAsBoolean())return;SystemClock.sleep(100);}throw new AssertionError("Timeout "+name);}

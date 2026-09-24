@@ -6,6 +6,21 @@ static JavaVM *vm;
 static jobject service;
 static jmethodID protect;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+void core_failed(long long generation, char *message) {
+ JNIEnv *env; int detach=0;
+ if ((*vm)->GetEnv(vm,(void**)&env,JNI_VERSION_1_6)!=JNI_OK) {if ((*vm)->AttachCurrentThread(vm,&env,NULL)!=JNI_OK) return;detach=1;}
+ pthread_mutex_lock(&lock);
+ if(service){
+  jclass cls=(*env)->GetObjectClass(env,service);
+  jmethodID method=(*env)->GetMethodID(env,cls,"onCoreFailure","(JLjava/lang/String;)V");
+  jstring text=(*env)->NewStringUTF(env,message);
+  if(method)(*env)->CallVoidMethod(env,service,method,(jlong)generation,text);
+  (*env)->DeleteLocalRef(env,text);(*env)->DeleteLocalRef(env,cls);
+  if((*env)->ExceptionCheck(env))(*env)->ExceptionClear(env);
+ }
+ pthread_mutex_unlock(&lock);
+ if(detach)(*vm)->DetachCurrentThread(vm);
+}
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *v, void *unused) { vm=v; return JNI_VERSION_1_6; }
 int protect_fd(int fd) {
  JNIEnv *env; int detach=0;

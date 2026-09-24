@@ -153,6 +153,7 @@ on() {
     rules_signature > "$STATE_DIR/rules.signature"
     touch "$MARKER"
     configuration_active || die '配置读回校验失败。'
+    validate_forwarding || die '转发后的 DNS/TLS 连通性验证失败，恢复原网络。'
     rm -f "$SUSPEND"
     trap - ERR
     printf '已应用 IPv6 优先转发；同域名的 IPv6 连接全部失败后才回退 IPv4。\n'

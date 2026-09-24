@@ -29,7 +29,7 @@ func ParseSNI(b []byte) string {
 		return ""
 	}
 	n := int(binary.BigEndian.Uint16(b[3:5]))
-	if n+5 > len(b) {
+	if n < 4 || n+5 > len(b) {
 		return ""
 	}
 	b = b[9 : 5+n]

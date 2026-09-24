@@ -4,7 +4,10 @@ package main
 
 /*
 #include <stdlib.h>
+#include <android/log.h>
+#cgo LDFLAGS: -llog
 int protect_fd(int fd);
+void core_failed(long long generation, char *message);
 */
 import "C"
 import (
@@ -12,16 +15,30 @@ import (
 	"fmt"
 	core "github.com/y38501148-max/v6only/core"
 	"golang.org/x/sys/unix"
+	"log"
 	"strconv"
 	"sync"
 	"syscall"
+	"unsafe"
 )
 
 var mu sync.Mutex
 var active *core.Tunnel
 
+type androidLogger struct{}
+
+func (androidLogger) Write(p []byte) (int, error) {
+	msg := C.CString(string(p))
+	tag := C.CString("v6core")
+	C.__android_log_write(C.ANDROID_LOG_ERROR, tag, msg)
+	C.free(unsafe.Pointer(msg))
+	C.free(unsafe.Pointer(tag))
+	return len(p), nil
+}
+
 //export startCore
 func startCore(fd C.int, config *C.char) *C.char {
+	log.SetOutput(androidLogger{})
 	mu.Lock()
 	defer mu.Unlock()
 	if active != nil {
@@ -54,6 +71,13 @@ func startCore(fd C.int, config *C.char) *C.char {
 		return C.CString(e.Error())
 	}
 	active = t
+	go func() {
+		if e, ok := <-r.WatchDataPlane(); ok {
+			message := C.CString(e.Error())
+			C.core_failed(C.longlong(cfg.Generation), message)
+			C.free(unsafe.Pointer(message))
+		}
+	}()
 	return C.CString("")
 }
 

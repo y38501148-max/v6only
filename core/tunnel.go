@@ -62,6 +62,11 @@ func (r *Router) tcp(c adapter.TCPConn) {
 	id := c.ID()
 	ip := net.IP(id.LocalAddress.AsSlice())
 	port := id.LocalPort
+	if ip.String() == healthAddress && port == healthPort {
+		c.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		io.WriteString(c, healthReply)
+		return
+	}
 	if port == 53 {
 		r.dnsTCP(c)
 		return

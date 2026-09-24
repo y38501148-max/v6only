@@ -24,9 +24,12 @@ public class FixtureVpn extends V6VpnService {
             ConnectivityManager cm=getSystemService(ConnectivityManager.class);
             for (Network network:cm.getAllNetworks()) {
                 NetworkCapabilities caps=cm.getNetworkCapabilities(network);
-                if(caps!=null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)){physical=network;break;}
+                if(caps!=null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)){
+                    physical=network;if(caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))break;
+                }
             }
             if(physical==null)throw new IOException("No physical network");
+            android.util.Log.i("FixtureVpn","Physical network "+physical+" "+cm.getLinkProperties(physical));
             fixture=new Builder().setSession("v6only disposable fixture").setMtu(1500)
                 .addAddress("198.18.0.1",15).addAddress("fd00:198:18::1",64)
                 .addRoute("0.0.0.0",0).addRoute("::",0).addDnsServer("198.18.0.2")

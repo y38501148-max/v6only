@@ -111,8 +111,15 @@ function Start-V6Core($Adapter) {
     if (-not (Test-Path $CoreReady)) { throw 'Forwarding core readiness timeout' }
     $tun = Get-NetAdapter -Name 'v6only-tun' -ErrorAction Stop
     Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv4 -Dhcp Disabled
+    Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv4 -DadTransmits 0
+    Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv6 -DadTransmits 0
     New-NetIPAddress -InterfaceIndex $tun.ifIndex -IPAddress '198.18.0.1' -PrefixLength 24 | Out-Null
     New-NetIPAddress -InterfaceIndex $tun.ifIndex -IPAddress 'fd00:198:18::1' -PrefixLength 64 | Out-Null
+    for ($i=0;$i -lt 40;$i++) {
+        if ((Get-NetIPAddress -InterfaceIndex $tun.ifIndex -IPAddress '198.18.0.1').AddressState -eq 'Preferred') { break }
+        Start-Sleep -Milliseconds 250
+    }
+    if ((Get-NetIPAddress -InterfaceIndex $tun.ifIndex -IPAddress '198.18.0.1').AddressState -ne 'Preferred') { throw 'Wintun address not ready' }
     foreach ($prefix in @('0.0.0.0/1','128.0.0.0/1')) {
         New-NetRoute -InterfaceIndex $tun.ifIndex -DestinationPrefix $prefix -NextHop '0.0.0.0' -RouteMetric 1 -PolicyStore ActiveStore | Out-Null
     }

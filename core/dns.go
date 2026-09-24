@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"github.com/miekg/dns"
 	"io"
+	"log"
 	"net"
 	"strings"
 	"time"
@@ -20,16 +21,23 @@ func (r *Router) DNS(ctx context.Context, wire []byte) []byte {
 	a.RecursionAvailable = true
 	question := q.Question[0]
 	host := strings.TrimSuffix(strings.ToLower(question.Name), ".")
+	if question.Name == healthHost && question.Qtype == dns.TypeA && question.Qclass == dns.ClassINET {
+		a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: healthHost, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 0}, A: net.ParseIP(healthAddress)}}
+		b, _ := a.Pack()
+		return b
+	}
 	if question.Qclass != dns.ClassINET {
 		a.Rcode = dns.RcodeRefused
 	} else if question.Qtype == dns.TypeA || question.Qtype == dns.TypeAAAA {
 		// Preserve upstream NXDOMAIN/NODATA instead of turning absent names into
 		// SERVFAIL or inventing an IPv4 answer for an IPv6-only origin.
-		upstream, e := r.query(ctx, host, question.Qtype)
+		var upstream *dns.Msg
+		var e error
 		var found Result
 		if r.LookupOverride != nil {
 			found, e = r.lookup(ctx, host)
-			upstream = nil
+		} else {
+			upstream, e = r.query(ctx, host, question.Qtype)
 		}
 		if e == nil && upstream != nil && upstream.Rcode == dns.RcodeNameError {
 			a = upstream
@@ -39,8 +47,16 @@ func (r *Router) DNS(ctx context.Context, wire []byte) []byte {
 		}
 		if e == nil && upstream != nil {
 			found, e = r.lookup(ctx, host)
+			if e != nil && !r.cfg.FakeDNS {
+				// Desktop DNS must remain usable when only the other record family
+				// times out. Preserve the answer we actually obtained.
+				upstream.Id = q.Id
+				b, _ := upstream.Pack()
+				return b
+			}
 		}
 		if e != nil {
+			log.Printf("DNS forwarding failed: %v", e)
 			a.Rcode = dns.RcodeServerFailure
 		} else {
 			hdr := dns.RR_Header{Name: question.Name, Rrtype: question.Qtype, Class: dns.ClassINET, Ttl: uint32(found.TTL / time.Second)}

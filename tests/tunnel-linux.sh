@@ -31,6 +31,8 @@ ip -n "$SERVER" -6 addr add 2001:db8:1::3/128 dev lo nodad
 ip -n "$CLIENT" route add default via 192.0.2.1
 ip -n "$CLIENT" -6 route add default via fd00:feed:1::1
 ip netns exec "$SERVER" "$BIN/netfixture" --listen4 203.0.113.3 --listen6 2001:db8:1::3 > "$BIN/fixture.log" 2>&1 &
+for _ in {1..100}; do grep -q 'fixture ready' "$BIN/fixture.log" && break; sleep 0.1; done
+grep -q 'fixture ready' "$BIN/fixture.log" || { cat "$BIN/fixture.log"; exit 1; }
 ip netns exec "$CLIENT" "$BIN/v6core" --interface client0 --device v6test --fake-dns --dns 203.0.113.3:15353 --ready "$BIN/ready" > "$BIN/core.log" 2>&1 &
 for _ in {1..50}; do [[ -f "$BIN/ready" ]] && break; sleep 0.1; done
 [[ -f "$BIN/ready" ]] || { cat "$BIN/core.log"; exit 1; }

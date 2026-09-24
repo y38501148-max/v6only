@@ -9,7 +9,10 @@ PROJ=$(cd "$(dirname "$0")/.." && pwd)
 BIN="$PROJ/core/build/integration"
 mkdir -p "$BIN"
 CORE_PID=''; FIXTURE_PID=''
-stop_core() {
+STATE_DIR="$BIN/runtime"
+# Use the same physical bypass route implementation as the released controller.
+source "$PROJ/macos/v6-runtime.sh"
+stop_test_core() {
     if [[ -n "$CORE_PID" ]]; then
         kill "$CORE_PID" 2>/dev/null || true
         for _ in {1..50}; do kill -0 "$CORE_PID" 2>/dev/null || break; sleep 0.1; done
@@ -20,7 +23,8 @@ stop_core() {
     rm -f "$BIN/ready"
 }
 cleanup() {
-    stop_core
+    stop_test_core
+    remove_physical_routes || true
     [[ -z "$FIXTURE_PID" ]] || kill "$FIXTURE_PID" 2>/dev/null || true
     ifconfig lo0 inet 203.0.113.3 -alias 2>/dev/null || true
     ifconfig lo0 inet6 2001:db8:1::3 -alias 2>/dev/null || true
@@ -44,7 +48,7 @@ start() {
 start --interface lo0 --dns 203.0.113.3:15353 --fake-dns
 route -n add -net 198.18.0.0/15 -interface "$DEV"
 "$BIN/netcheck" --skip-sni || { cat "$BIN/core.log"; exit 1; }
-stop_core
+stop_test_core
 echo 'PASS controlled dual-stack sockets through macOS utun'
 
 # Exercise full routing with the VM's own physical DNS; no loopback DNS setting.
@@ -53,13 +57,16 @@ UPSTREAM=$(scutil --dns | awk '/nameserver\[0\]/{print $3;exit}')
 [[ -n "$PHYSICAL" && -n "$UPSTREAM" ]] || exit 1
 curl --noproxy '*' -fsS --max-time 20 https://example.com/ -o /dev/null
 start --interface "$PHYSICAL" --dns "$UPSTREAM"
+IFACE="$PHYSICAL"
+setup_physical_routes
 route -n add -net 0.0.0.0/1 -interface "$DEV"
 route -n add -net 128.0.0.0/1 -interface "$DEV"
 route -n add -inet6 ::/1 -interface "$DEV"
 route -n add -inet6 8000::/1 -interface "$DEV"
 curl --noproxy '*' -fsS --max-time 30 https://example.com/ -o /dev/null || { cat "$BIN/core.log"; exit 1; }
 echo 'PASS real HTTPS with full macOS TUN routing'
-stop_core
+stop_test_core
+remove_physical_routes
 [[ $(route -n get 1.1.1.1 | awk '/interface:/{print $2}') == "$PHYSICAL" ]]
 curl --noproxy '*' -fsS --max-time 20 https://example.com/ -o /dev/null
 echo 'PASS core exit restores physical routing and DNS remains usable'

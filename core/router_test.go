@@ -15,7 +15,7 @@ import (
 
 func fixture(t *testing.T, hosts Result) (*Router, *[]string) {
 	t.Helper()
-	r := New(Config{FamilyTimeoutMS: 200, FakeDNS:true}, nil)
+	r := New(Config{FamilyTimeoutMS: 200, FakeDNS: true}, nil)
 	r.LookupOverride = func(context.Context, string) (Result, error) { return hosts, nil }
 	calls := []string{}
 	var mu sync.Mutex

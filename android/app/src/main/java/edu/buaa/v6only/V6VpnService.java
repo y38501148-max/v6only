@@ -37,6 +37,7 @@ public class V6VpnService extends VpnService {
     private boolean destroyed;
     private boolean stopping;
     private volatile Network coreNetwork;
+    private long coreGeneration;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -130,7 +131,7 @@ public class V6VpnService extends VpnService {
             tun = next;
             org.json.JSONArray servers = new org.json.JSONArray();
             for (InetAddress address : dns) servers.put(address.getHostAddress());
-            org.json.JSONObject config = new org.json.JSONObject().put("dns", servers).put("fake_dns", true);
+            org.json.JSONObject config = new org.json.JSONObject().put("dns", servers).put("fake_dns", true).put("generation",coreGeneration);
             String error = CoreNative.start(next.getFd(), config.toString(), this);
             if (!error.isEmpty()) throw new IOException(error);
             configuration = key;
@@ -182,14 +183,25 @@ public class V6VpnService extends VpnService {
     }
 
     private void closeTun() {
-        CoreNative.stop();
-        coreNetwork = null;
+        coreGeneration++;
         if (tun != null) {
             try { tun.close(); } catch (IOException error) { Log.w("V6VpnService", "Close TUN", error); }
             tun = null;
         }
+        CoreNative.stop();
+        coreNetwork = null;
         configuration = "";
         V6VpnServiceExt.setRunning(false);
+    }
+
+    public void onCoreFailure(long generation,String error) {
+        handler.post(() -> {
+            if (generation!=coreGeneration || destroyed) return;
+            Log.e("V6VpnService",error);
+            prefs.edit().putBoolean("enabled",false).commit();
+            stopEverything();
+            publish("转发异常，已恢复系统网络；请检查后手动启动");
+        });
     }
 
     private void stopEverything() {

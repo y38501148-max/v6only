@@ -132,7 +132,15 @@ func run() error {
 	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	<-sig
+	var failed <-chan error
+	if tunnel != nil {
+		failed = r.WatchDataPlane()
+	}
+	select {
+	case <-sig:
+	case e := <-failed:
+		return e
+	}
 	return nil
 }
 

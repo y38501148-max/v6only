@@ -76,7 +76,7 @@ class MacOSControllerTests(unittest.TestCase):
     def save(self, state): self.state.write_text(json.dumps(state))
     def read(self): return json.loads(self.state.read_text())
     def script(self, body, source='v6ctl.sh', ok=True):
-        code=f'source "{ROOT}/macos/{source}"\nrequire_root() {{ :; }}\ncore_active() {{ [[ -f \"$STATE_DIR/fake-core\" ]]; }}\nstart_core() {{ touch \"$STATE_DIR/fake-core\"; }}\nstop_core() {{ rm -f \"$STATE_DIR/fake-core\"; }}\nrules_signature() {{ printf mock; }}\n'+body
+        code=f'source "{ROOT}/macos/{source}"\nrequire_root() {{ :; }}\ncore_active() {{ [[ -f \"$STATE_DIR/fake-core\" ]]; }}\nstart_core() {{ touch \"$STATE_DIR/fake-core\"; }}\nstop_core() {{ rm -f \"$STATE_DIR/fake-core\"; }}\nvalidate_forwarding() {{ [[ ${{FAKE_FORWARD_FAIL:-0}} != 1 ]]; }}\nrules_signature() {{ printf mock; }}\n'+body
         r=subprocess.run(['/bin/bash','-c',code],env=self.env,text=True,capture_output=True)
         if ok: self.assertEqual(r.returncode,0,r.stdout+r.stderr)
         else: self.assertNotEqual(r.returncode,0,r.stdout+r.stderr)
