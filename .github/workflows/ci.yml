@@ -180,8 +180,43 @@ jobs:
         run: |
           source android/sdk-env.sh
           "$BT/aapt2" dump xmltree android/v6only.apk --file AndroidManifest.xml > /tmp/manifest.txt
-          if grep -q FixtureVpn /tmp/manifest.txt; then exit 1; fi
+          if grep -Eq 'FixtureVpn|HandoverVpn|OtherVpn' /tmp/manifest.txt; then exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
           name: v6only-apk
           path: android/v6only.apk
+
+  android-cellular:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: core/go.mod, cache-dependency-path: core/go.sum}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - name: Install Android build tools and enable emulator KVM
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.13846066' 'platforms;android-35' 'build-tools;35.0.0'
+          sudo chmod 666 /dev/kvm
+      - name: Real mobile startup, VPN coexistence and campus Wi-Fi handover
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            export V6ONLY_ANDROID_ABIS=x86_64
+            export ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
+            export ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+            for suite in cellular other-vpn handover network; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-cellular-api-${{ matrix.api }}
+          path: android/build/device-tests/result.txt

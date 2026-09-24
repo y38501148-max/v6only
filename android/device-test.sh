@@ -13,7 +13,7 @@ if [[ -n "${V6ONLY_KEYSTORE:-}" ]]; then
   echo 'Device tests use the local debug key; unset V6ONLY_KEYSTORE.' >&2
   exit 1
 fi
-if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel ]]; then export V6ONLY_TEST_FIXTURE=1; fi
+if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel || ${V6ONLY_TEST_SUITE:-network} == handover ]]; then export V6ONLY_TEST_FIXTURE=1; fi
 bash "$PROJ/build-apk.sh"
 OUT="$PROJ/build/device-tests"
 mkdir -p "$OUT/obj" "$OUT/apk" "$OUT/web"
@@ -41,15 +41,43 @@ find "$OUT/obj" -name '*.class' > "$OUT/classes.txt"
 "$BT/apksigner" sign --ks "$PROJ/debug.keystore" --ks-pass pass:v6only \
   --v4-signing-enabled false --out "$OUT/tests.apk" "$OUT/apk/aligned.apk"
 APK="$PROJ/v6only.apk"
-[[ ${V6ONLY_TEST_SUITE:-network} != tunnel ]] || APK="$PROJ/v6only-fixture.apk"
+[[ ${V6ONLY_TEST_FIXTURE:-0} != 1 ]] || APK="$PROJ/v6only-fixture.apk"
 "${ADB[@]}" install --no-incremental -r "$APK"
 "${ADB[@]}" install --no-incremental -r "$OUT/tests.apk"
-"${ADB[@]}" shell appops set edu.buaa.v6only ACTIVATE_VPN allow
+if [[ ${V6ONLY_TEST_SUITE:-network} == cellular ]]; then
+  "${ADB[@]}" shell svc wifi disable
+  "${ADB[@]}" shell svc data enable
+  "${ADB[@]}" shell appops set edu.buaa.v6only ACTIVATE_VPN deny
+else
+  "${ADB[@]}" shell appops set edu.buaa.v6only ACTIVATE_VPN allow
+fi
 "${ADB[@]}" shell pm grant edu.buaa.v6only android.permission.POST_NOTIFICATIONS || true
 case "${V6ONLY_TEST_SUITE:-network}" in
-  network|ui|all|tunnel) ;;
-  *) echo 'V6ONLY_TEST_SUITE must be network, ui, all or tunnel.' >&2; exit 1 ;;
+  network|ui|all|tunnel|cellular|handover|other-vpn) ;;
+  *) echo 'V6ONLY_TEST_SUITE must be network, ui, all, tunnel, cellular, handover or other-vpn.' >&2; exit 1 ;;
 esac
+# A failed consent test can leave an OS dialog above the next instrumentation activity.
+"${ADB[@]}" shell am force-stop com.android.vpndialogs
+"${ADB[@]}" shell am force-stop edu.buaa.v6only
+if [[ ${V6ONLY_TEST_SUITE:-network} == other-vpn ]]; then
+  "${ADB[@]}" shell svc wifi disable
+  "${ADB[@]}" shell svc data enable
+  "${ADB[@]}" shell appops set edu.buaa.v6only.tests ACTIVATE_VPN allow
+  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.OtherVpnSmoke | tee "$OUT/result.txt"
+  "${ADB[@]}" shell am force-stop edu.buaa.v6only.tests
+  grep -q 'PASS: cellular start/reapply/update/stop preserve another VPN' "$OUT/result.txt"
+  exit
+fi
+if [[ ${V6ONLY_TEST_SUITE:-network} == handover ]]; then
+  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.HandoverSmoke | tee "$OUT/result.txt"
+  grep -q 'PASS: Android campus-to-cellular handover' "$OUT/result.txt"
+  exit
+fi
+if [[ ${V6ONLY_TEST_SUITE:-network} == cellular ]]; then
+  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.CellularSmoke | tee "$OUT/result.txt"
+  grep -q 'PASS: cellular startup' "$OUT/result.txt"
+  exit
+fi
 if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel ]]; then
   "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.TunnelSmoke | tee "$OUT/result.txt"
   grep -q 'PASS: Android native tunnel integration' "$OUT/result.txt"

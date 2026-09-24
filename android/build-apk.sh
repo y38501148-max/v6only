@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 s=Path(sys.argv[1]).read_text()
 s=s.replace('</application>', '<service android:name=".FixtureVpn" android:exported="false" android:permission="android.permission.BIND_VPN_SERVICE" android:foregroundServiceType="specialUse"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Disposable emulator networking fixture"/><intent-filter><action android:name="android.net.VpnService"/></intent-filter></service></application>')
+s=s.replace('</application>', '<service android:name=".HandoverVpn" android:exported="false" android:permission="android.permission.BIND_VPN_SERVICE" android:foregroundServiceType="specialUse"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Disposable emulator handover fixture"/><meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false"/><intent-filter><action android:name="android.net.VpnService"/></intent-filter></service></application>')
 Path(sys.argv[2]).write_text(s)
 PY
   APK="$PROJ/v6only-fixture.apk"

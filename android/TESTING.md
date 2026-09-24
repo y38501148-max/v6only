@@ -1,4 +1,4 @@
-# Android 1.1.0 tests
+# Android 1.1.1 tests
 
 Use a disposable Android emulator, never a personal phone. The native core requires Go (see `core/go.mod`), NDK 29.0.13846066, JDK 17+, Android SDK/API 34+ and build-tools. `ANDROID_HOME` locates the SDK.
 
@@ -11,13 +11,25 @@ ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a bash android/device-t
 
 The host policy suite checks campus DNS/domain/SSID boundaries, ordinary private networks, explicit stop and manual/automatic state. `NetworkSmoke` installs the production APK on an ordinary non-campus emulator and verifies manual refusal, automatic standby without a VPN, Recents removal and explicit stop.
 
+## Cellular startup and Wi-Fi handover regressions
+
+```sh
+ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a V6ONLY_TEST_SUITE=cellular bash android/device-test.sh
+ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a V6ONLY_TEST_SUITE=other-vpn bash android/device-test.sh
+ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a V6ONLY_TEST_SUITE=handover bash android/device-test.sh
+```
+
+`CellularSmoke` disables emulator Wi-Fi and refuses pre-authorization. Starting from the real UI must enter standby without a VPN consent dialog; unbound HTTP and DNS sockets must keep working before/after startup, reapply and manual refusal. `OtherVpnSmoke` runs an unrelated split-route VPN in the test APK's separate UID and verifies that previously authorized v6only startup, reapply, package-update restoration and stop do not revoke it. Both regressions fail against 1.1.0.
+
+`HandoverSmoke` uses real Wi-Fi/cellular transport switching. The fixture-only `HandoverVpn` labels emulator Wi-Fi as campus; all selection callbacks, authorization, establishment and teardown use the production service. Automatic/manual modes must remove VPN routes and synthetic DNS on mobile and preserve unbound HTTP connectivity. Reapplying settings while connected must preserve the existing tunnel. The host Mac network is never changed. The CI emulator matrix exercises Android 10 / 15 in isolated Linux VMs.
+
 ## Real native tunnel integration
 
 ```sh
 ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a V6ONLY_TEST_SUITE=tunnel bash android/device-test.sh
 ```
 
-This creates `v6only-fixture.apk`, using the same production `establishTunnel`, `closeTun`, JNI and physical-socket protection implementation. A test-only service supplies the emulator network and controlled DNS in place of campus discovery. The fixture service and manifest entry are absent from production builds and cannot be signed using the release-key build option. CI inspects the production manifest for leakage.
+This creates `v6only-fixture.apk`, using the same production `establishTunnel`, `closeTun`, JNI and physical-socket protection implementation. A test-only service supplies the emulator network and controlled DNS in place of campus discovery. Both fixture services and their manifest entries are absent from production builds and cannot be signed using the release-key build option. CI inspects the production manifest for leakage.
 
 Loopback fixture servers on the host provide controlled IPv4/IPv6 endpoints and DNS at port 15353. The emulator accesses them via 10.0.2.2 and fec0::2. Tests exercise real Android VPN routes, A queries over TCP/UDP, IPv4-entry flows upgraded to IPv6, IPv4-only origins, explicit IPv6 failure with IPv4 fallback, native diagnostics, and physical connectivity after stop. No host route, DNS or firewall settings are modified.
 

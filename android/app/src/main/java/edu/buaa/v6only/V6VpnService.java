@@ -12,7 +12,6 @@ import android.net.VpnService;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
-import android.system.OsConstants;
 import android.util.Log;
 import java.io.IOException;
 import java.net.Inet6Address;
@@ -61,12 +60,8 @@ public class V6VpnService extends VpnService {
             stopEverything();
             return START_NOT_STICKY;
         }
-        if (prepare(this) != null) {
-            prefs.edit().putBoolean("enabled", false).commit();
-            stopEverything();
-            publish("需要重新授权 VPN");
-            return START_NOT_STICKY;
-        }
+        // Monitoring does not own a VPN. Preparing before campus detection can
+        // revoke another app's VPN even though we will only stand by on cellular.
         V6VpnServiceExt.setMonitoring(true);
         // Re-register after a permission change so SSID callbacks can include location info.
         if (ACTION_APPLY.equals(action)) watcher.stop();
@@ -75,9 +70,10 @@ public class V6VpnService extends VpnService {
         return START_STICKY;
     }
 
-    private void reconcile(CampusWatcher.State state) {
+    protected void reconcile(CampusWatcher.State state) {
         if (destroyed || !prefs.getBoolean("enabled", false)) return;
         handler.removeCallbacks(retry);
+        V6VpnServiceExt.setPermissionRequired(false);
         V6VpnServiceExt.setCampus(state.isCampus(), state.campusReason);
         boolean automatic = prefs.getBoolean("auto", true);
         if (!CampusPolicy.shouldConnect(true, automatic, state.isCampus(), state.network != null)) {
@@ -92,7 +88,9 @@ public class V6VpnService extends VpnService {
             return;
         }
         if (prepare(this) != null) {
-            onRevoke();
+            closeTun();
+            V6VpnServiceExt.setPermissionRequired(true);
+            publish("校园网已识别，请打开应用授权 VPN");
             return;
         }
         // Keep the network-provided DNS servers so campus/internal names continue to work.
@@ -191,12 +189,18 @@ public class V6VpnService extends VpnService {
 
     protected final void closeTun() {
         coreGeneration++;
+        boolean ownedCore = coreNetwork != null;
+        // Reject outgoing sockets from the old generation as soon as handover starts.
+        coreNetwork = null;
         if (tun != null) {
             try { tun.close(); } catch (IOException error) { Log.w("V6VpnService", "Close TUN", error); }
             tun = null;
         }
-        CoreNative.stop();
-        coreNetwork = null;
+        if (ownedCore) {
+            CoreNative.stop();
+            try { setUnderlyingNetworks(null); }
+            catch (SecurityException revoked) { Log.i("V6VpnService", "VPN already revoked"); }
+        }
         configuration = "";
         V6VpnServiceExt.setRunning(false);
     }
@@ -217,6 +221,7 @@ public class V6VpnService extends VpnService {
         watcher.stop();
         closeTun();
         V6VpnServiceExt.setMonitoring(false);
+        V6VpnServiceExt.setPermissionRequired(false);
         V6VpnServiceExt.setCampus(false, "");
         publish("服务已停止");
         stopForeground(STOP_FOREGROUND_REMOVE);
@@ -244,6 +249,7 @@ public class V6VpnService extends VpnService {
         watcher.stop();
         closeTun();
         V6VpnServiceExt.setMonitoring(false);
+        V6VpnServiceExt.setPermissionRequired(false);
         // Keep the reason for an explicit shutdown visible after service destruction.
         publish(stopping ? V6VpnServiceExt.message() : "服务已停止");
         super.onDestroy();

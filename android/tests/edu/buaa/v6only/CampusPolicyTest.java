@@ -30,7 +30,15 @@ public final class CampusPolicyTest {
                 }
             }
         }
-        System.out.println("PASS: 32 campus detection and mode regression checks");
+        check(CampusPolicy.campusTransport(true, false, false, false)); // Wi-Fi
+        check(CampusPolicy.campusTransport(false, true, false, false)); // Ethernet
+        check(!CampusPolicy.campusTransport(false, false, true, false)); // mobile
+        check(!CampusPolicy.campusTransport(true, false, true, false)); // carrier-merged Wi-Fi
+        check(!CampusPolicy.campusTransport(false, true, true, false)); // mixed mobile transport
+        check(!CampusPolicy.campusTransport(true, false, false, true)); // VPN inherits Wi-Fi
+        check(!CampusPolicy.campusTransport(false, false, true, true)); // VPN inherits mobile
+        check(!CampusPolicy.campusTransport(false, false, false, false)); // unknown
+        System.out.println("PASS: 40 campus detection, transport and mode regression checks");
     }
     private static void check(boolean value) { if (!value) throw new AssertionError(); }
 }
