@@ -73,7 +73,7 @@ public final class CellularSmoke extends Instrumentation {
         try (Socket s = new Socket()) {
             s.connect(new InetSocketAddress("10.0.2.2", 18765), 4000); s.setSoTimeout(4000);
             s.getOutputStream().write("GET /marker HTTP/1.0\r\nHost: 10.0.2.2\r\n\r\n".getBytes("US-ASCII"));
-            ByteArrayOutputStream out = new ByteArrayOutputStream(); s.getInputStream().transferTo(out);
+            ByteArrayOutputStream out = new ByteArrayOutputStream(); TestIo.copy(s.getInputStream(),out);
             check(out.toString("US-ASCII").contains("v6only network regression fixture"), "default HTTP body");
         }
         byte[] q = new byte[]{0x12,0x34,1,0,0,1,0,0,0,0,0,0,7,'e','x','a','m','p','l','e',3,'c','o','m',0,0,1,0,1};

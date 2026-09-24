@@ -77,7 +77,7 @@ public final class HandoverSmoke extends Instrumentation {
         try(Socket s=new Socket()) {
             s.connect(new InetSocketAddress("10.0.2.2",18765),5000);s.setSoTimeout(5000);
             s.getOutputStream().write("GET /marker HTTP/1.0\r\nHost: 10.0.2.2\r\n\r\n".getBytes("US-ASCII"));
-            ByteArrayOutputStream out=new ByteArrayOutputStream();s.getInputStream().transferTo(out);
+            ByteArrayOutputStream out=new ByteArrayOutputStream();TestIo.copy(s.getInputStream(),out);
             check(out.toString("US-ASCII").contains("v6only network regression fixture"),"default HTTP response");
         }
     }
@@ -86,7 +86,7 @@ public final class HandoverSmoke extends Instrumentation {
         return c!=null&&c.hasTransport(type)&&(type==NetworkCapabilities.TRANSPORT_VPN||!c.hasTransport(NetworkCapabilities.TRANSPORT_VPN));
     }
     private void shell(String cmd) throws Exception {
-        try(android.os.ParcelFileDescriptor p=getUiAutomation().executeShellCommand(cmd);InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(p)) { in.transferTo(new ByteArrayOutputStream()); }
+        try(android.os.ParcelFileDescriptor p=getUiAutomation().executeShellCommand(cmd);InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(p)) { TestIo.copy(in,new ByteArrayOutputStream()); }
     }
     private void command(String action) {runOnMainSync(()->context.startForegroundService(new Intent().setClassName(context.getPackageName(),"edu.buaa.v6only.HandoverVpn").setAction(action)));}
     private void await(BooleanSupplier predicate,String name) {long end=SystemClock.elapsedRealtime()+20000;while(SystemClock.elapsedRealtime()<end){if(predicate.getAsBoolean())return;SystemClock.sleep(100);}throw new AssertionError("Timeout "+name);}

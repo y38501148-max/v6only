@@ -27,7 +27,7 @@ public final class OtherVpnSmoke extends Instrumentation {
             context.getSharedPreferences("v6only",Context.MODE_PRIVATE).edit().putBoolean("enabled",false).putBoolean("auto",true).commit();
             Activity activity=startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             try(android.os.ParcelFileDescriptor p=getUiAutomation().executeShellCommand("am start -n edu.buaa.v6only.tests/.OtherVpnActivity");
-                java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(p)) {in.transferTo(new java.io.ByteArrayOutputStream());}
+                java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(p)) {TestIo.copy(in,new java.io.ByteArrayOutputStream());}
             await(()->vpn()!=null,"other VPN active");
             Network other=vpn();
             runOnMainSync(()->activity.findViewById(R.id.toggle_service).performClick());

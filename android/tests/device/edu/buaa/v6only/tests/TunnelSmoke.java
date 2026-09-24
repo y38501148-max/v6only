@@ -34,7 +34,7 @@ public class TunnelSmoke extends Instrumentation {
                 try(Socket socket=new Socket()){
                     vpn.bindSocket(socket);socket.connect(new InetSocketAddress(ip,18080),10000);socket.setSoTimeout(10000);
                     socket.getOutputStream().write(("GET / HTTP/1.0\r\nHost: "+item[0]+"\r\n\r\n").getBytes("US-ASCII"));
-                    ByteArrayOutputStream out=new ByteArrayOutputStream();socket.getInputStream().transferTo(out);
+                    ByteArrayOutputStream out=new ByteArrayOutputStream();TestIo.copy(socket.getInputStream(),out);
                     check(out.toString("US-ASCII").endsWith("tcp"+item[1]+"\n"),"TCP family for "+item[0]);
                 }
                 try(DatagramSocket socket=new DatagramSocket()){
