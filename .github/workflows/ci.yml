@@ -69,7 +69,11 @@ jobs:
       - name: DNS 配置 API 冒烟（真实 DnsClient 模块）
         shell: pwsh
         run: |
-          $if = Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1
+          # Hosted runners can have an Up adapter with IPv6 disabled. Select a
+          # compatible adapter before exercising the IPv6 DNS API.
+          $if = Get-NetAdapter | Where-Object Status -eq 'Up' | Where-Object {
+            Get-DnsClientServerAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv6 -ErrorAction SilentlyContinue
+          } | Select-Object -First 1
           if ($if) {
             # 记录当前 → 设置测试值 → 校验 → 还原
             $before = Get-DnsClientServerAddress -InterfaceIndex $if.ifIndex -AddressFamily IPv6
@@ -79,7 +83,7 @@ jobs:
             Set-DnsClientServerAddress -InterfaceIndex $if.ifIndex -ResetServerAddresses
             Write-Host "✓ Set-DnsClientServerAddress 冒烟通过 ($($if.Name))"
           } else {
-            Write-Host "⚠ CI 无活动网卡，跳过（不影响逻辑验证）"
+            Write-Host "⚠ CI 无启用 IPv6 DNS 的活动网卡，跳过 IPv6 DNS API 冒烟（其余测试继续）"
           }
 
   macos-shellcheck:
