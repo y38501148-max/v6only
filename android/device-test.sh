@@ -25,7 +25,26 @@ else
   (cd "$OUT/web" && exec python3 "$PROJ/tests/device/network-fixture.py") > "$OUT/http.log" 2>&1 &
 fi
 SERVER_PID=$!
-trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+cleanup() {
+  local result=$?
+  if [[ $result -ne 0 ]]; then
+    "${ADB[@]}" shell dumpsys connectivity > "$OUT/connectivity.log" 2>&1 || true
+    "${ADB[@]}" shell ip route show table all > "$OUT/routes.log" 2>&1 || true
+    "${ADB[@]}" logcat -d -s V6VpnService AndroidRuntime > "$OUT/service.log" 2>&1 || true
+  fi
+  kill "$SERVER_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+instrument() {
+  python3 - "${ADB[@]}" shell am instrument -w "$1" <<'PYTHON'
+import subprocess,sys
+try:
+    sys.exit(subprocess.run(sys.argv[1:],timeout=180).returncode)
+except subprocess.TimeoutExpired:
+    print("Instrumentation did not finish in 180 seconds",file=sys.stderr)
+    sys.exit(1)
+PYTHON
+}
 # Fail before running the app if either fixture could not bind.
 sleep 0.3
 kill -0 "$SERVER_PID" || { cat "$OUT/http.log" >&2; exit 1; }
@@ -51,7 +70,9 @@ if [[ ${V6ONLY_TEST_SUITE:-network} == cellular ]]; then
 else
   "${ADB[@]}" shell appops set edu.buaa.v6only ACTIVATE_VPN allow
 fi
-"${ADB[@]}" shell pm grant edu.buaa.v6only android.permission.POST_NOTIFICATIONS || true
+if [[ $("${ADB[@]}" shell getprop ro.build.version.sdk | tr -d '\r') -ge 33 ]]; then
+  "${ADB[@]}" shell pm grant edu.buaa.v6only android.permission.POST_NOTIFICATIONS
+fi
 case "${V6ONLY_TEST_SUITE:-network}" in
   network|ui|all|tunnel|cellular|handover|other-vpn) ;;
   *) echo 'V6ONLY_TEST_SUITE must be network, ui, all, tunnel, cellular, handover or other-vpn.' >&2; exit 1 ;;
@@ -63,28 +84,28 @@ if [[ ${V6ONLY_TEST_SUITE:-network} == other-vpn ]]; then
   "${ADB[@]}" shell svc wifi disable
   "${ADB[@]}" shell svc data enable
   "${ADB[@]}" shell appops set edu.buaa.v6only.tests ACTIVATE_VPN allow
-  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.OtherVpnSmoke | tee "$OUT/result.txt"
+  instrument edu.buaa.v6only.tests/.OtherVpnSmoke | tee "$OUT/result.txt"
   "${ADB[@]}" shell am force-stop edu.buaa.v6only.tests
   grep -q 'PASS: cellular start/reapply/update/stop preserve another VPN' "$OUT/result.txt"
   exit
 fi
 if [[ ${V6ONLY_TEST_SUITE:-network} == handover ]]; then
-  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.HandoverSmoke | tee "$OUT/result.txt"
+  instrument edu.buaa.v6only.tests/.HandoverSmoke | tee "$OUT/result.txt"
   grep -q 'PASS: Android campus-to-cellular handover' "$OUT/result.txt"
   exit
 fi
 if [[ ${V6ONLY_TEST_SUITE:-network} == cellular ]]; then
-  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.CellularSmoke | tee "$OUT/result.txt"
+  instrument edu.buaa.v6only.tests/.CellularSmoke | tee "$OUT/result.txt"
   grep -q 'PASS: cellular startup' "$OUT/result.txt"
   exit
 fi
 if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel ]]; then
-  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.TunnelSmoke | tee "$OUT/result.txt"
+  instrument edu.buaa.v6only.tests/.TunnelSmoke | tee "$OUT/result.txt"
   grep -q 'PASS: Android native tunnel integration' "$OUT/result.txt"
   exit
 fi
 if [[ "${V6ONLY_TEST_SUITE:-network}" != ui ]]; then
-  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.NetworkSmoke | tee "$OUT/result.txt"
+  instrument edu.buaa.v6only.tests/.NetworkSmoke | tee "$OUT/result.txt"
   grep -q 'PASS: all Android device regression checks' "$OUT/result.txt"
 fi
 if [[ "${V6ONLY_TEST_SUITE:-network}" != network ]]; then

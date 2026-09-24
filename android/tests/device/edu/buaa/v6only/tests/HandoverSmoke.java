@@ -44,7 +44,7 @@ public final class HandoverSmoke extends Instrumentation {
                 check(before.equals(cm.getActiveNetwork()), "reapply must preserve healthy tunnel");
                 shell("svc wifi disable");
                 await(()->transport(NetworkCapabilities.TRANSPORT_CELLULAR)&&!V6VpnServiceExt.running(context),"VPN removed after mobile handover");
-                checkHttp();
+                awaitMobileHttp();
                 check(cm.getLinkProperties(cm.getActiveNetwork()).getDnsServers().stream()
                         .noneMatch(a->a.getHostAddress().equals("198.18.0.2")),"VPN DNS removed on cellular");
                 SystemClock.sleep(1000);
@@ -60,6 +60,20 @@ public final class HandoverSmoke extends Instrumentation {
             if(context!=null)command(V6VpnService.ACTION_STOP);
             try {shell("svc wifi enable");}catch(Exception ignored){}
         }
+    }
+    private void awaitMobileHttp() throws Exception {
+        // Android 10 can publish the cellular default before netd finishes removing
+        // the VPN's UID routing rules. Require real recovery within a bounded window.
+        long started=SystemClock.elapsedRealtime(),deadline=started+8000;
+        IOException last=null;
+        while(SystemClock.elapsedRealtime()<deadline) {
+            try {
+                checkHttp();
+                status("Mobile default HTTP usable after "+(SystemClock.elapsedRealtime()-started)+" ms");
+                return;
+            } catch(IOException error) {last=error;SystemClock.sleep(100);}
+        }
+        throw new AssertionError("Mobile data still unreachable after VPN teardown",last);
     }
     private Network stableTunnel() {
         // Emulator IPv6 RA/DNS can arrive after DHCP and legitimately rebuild the VPN.

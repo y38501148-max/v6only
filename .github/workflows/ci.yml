@@ -219,4 +219,6 @@ jobs:
         if: always()
         with:
           name: android-cellular-api-${{ matrix.api }}
-          path: android/build/device-tests/result.txt
+          path: |
+            android/build/device-tests/result.txt
+            android/build/device-tests/*.log
