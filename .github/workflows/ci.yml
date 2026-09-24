@@ -1,4 +1,4 @@
-name: windows-ci
+name: v6only-ci
 
 on: [push, pull_request, workflow_dispatch]
 
@@ -92,6 +92,19 @@ jobs:
           for f in macos/*.sh; do
             echo "== $f"; shellcheck -S warning "$f" || exit 1
           done
+      - name: macOS 控制器回归测试（模拟系统命令，不修改 runner 网络）
+        run: python3 -m unittest discover -s tests -v
+
+  macos-bash32:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 系统 Bash 兼容性和回归测试
+        run: |
+          for f in macos/*.sh; do /bin/bash -n "$f"; done
+          python3 -m unittest discover -s tests -v
+      - name: PF 规则解析（仅检查，不加载）
+        run: sudo pfctl -n -a com.apple/v6only -f macos/anchor-v6only
 
   android-build:
     runs-on: macos-latest
