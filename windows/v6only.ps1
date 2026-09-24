@@ -43,6 +43,24 @@ function Write-Log([string]$msg) {
     "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg" | Out-File $LogFile -Append -Encoding utf8
 }
 
+function Stop-V6Task([string]$TaskName = 'v6only-watch') {
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $task) { return }
+    # Unregistering/replacing a task alone does not stop its running process.
+    Disable-ScheduledTask -TaskName $TaskName | Out-Null
+    Stop-ScheduledTask -TaskName $TaskName
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if (-not $task -or $task.State -ne 'Running') { return }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "Cannot stop $TaskName; refusing to race the existing network watcher."
+}
+
+function Test-LegacyDns([string[]]$Dns) {
+    return (($Dns | Sort-Object) -join ',') -eq '202.112.128.50,2400:3200::1,240c::6666'
+}
+
 function Get-ActiveAdapter {
     $routes = @(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue)
     if (-not $routes) { $routes = @(Get-NetRoute -DestinationPrefix '::/0' -ErrorAction SilentlyContinue) }
@@ -112,7 +130,8 @@ function Invoke-V6On {
         $registry6 = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces\$guid" -ErrorAction SilentlyContinue
         $state = [pscustomobject]@{
             InterfaceGuid = [string]$adapter.InterfaceGuid
-            AutomaticDns = ([string]::IsNullOrWhiteSpace($registry.NameServer) -and [string]::IsNullOrWhiteSpace($registry6.NameServer))
+            AutomaticDns = (([string]::IsNullOrWhiteSpace($registry.NameServer) -and [string]::IsNullOrWhiteSpace($registry6.NameServer)) -or
+                ((Test-Path $Marker) -and (Test-LegacyDns $current)))
             OriginalDns = $current
             AppliedDns = $ManagedDns
         }
@@ -155,7 +174,7 @@ function Invoke-V6Off([switch]$Automatic) {
         # Legacy releases did not save a snapshot. Reset only their exact DNS profile.
         foreach ($adapter in (Get-NetAdapter)) {
             $dns = @(Get-AdapterDns $adapter)
-            if ((($dns | Sort-Object) -join ',') -eq '202.112.128.50,2400:3200::1,240c::6666') {
+            if (Test-LegacyDns $dns) {
                 Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses
             }
         }
@@ -233,6 +252,7 @@ switch ($true) {
     $On        { Invoke-V6On }
     $Off       { Invoke-V6Off }
     $Install {
+        Stop-V6Task
         $installDir = Split-Path $Marker
         New-Item -ItemType Directory -Force -Path $installDir | Out-Null
         $installedScript = Join-Path $installDir 'v6only.ps1'
@@ -251,9 +271,12 @@ switch ($true) {
                          -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
         Register-ScheduledTask -TaskName 'v6only-watch' -Action $action -Trigger $trigger `
             -Principal $principal -Settings $settings -Force | Out-Null
+        Enable-ScheduledTask -TaskName 'v6only-watch' | Out-Null
+        Start-ScheduledTask -TaskName 'v6only-watch'
         Write-Host "✅ 计划任务 v6only-watch 已注册（开机自启 + 5 分钟自愈）"
     }
     $Uninstall {
+        Stop-V6Task
         Unregister-ScheduledTask -TaskName 'v6only-watch' -Confirm:$false -ErrorAction SilentlyContinue
         Get-NetFirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue |
             Remove-NetFirewallRule

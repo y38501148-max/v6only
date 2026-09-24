@@ -53,7 +53,17 @@ function Remove-NetFirewallRule {
     param([Parameter(ValueFromPipeline)]$InputObject)
     process { if ($InputObject) { $script:FakeWrites++; $script:FakeRules.Remove($InputObject.DisplayName) } }
 }
+$FakeTask = [pscustomobject]@{State='Running'}
+$TaskDisabled=$false; $TaskStopped=$false
+function Get-ScheduledTask { return $FakeTask }
+function Disable-ScheduledTask { $script:TaskDisabled=$true }
+function Stop-ScheduledTask { $script:TaskStopped=$true; $script:FakeTask.State='Ready' }
 try {
+    Stop-V6Task
+    Assert ($TaskDisabled -and $TaskStopped -and $FakeTask.State -ne 'Running') 'old scheduled watcher is disabled and stopped'
+    $FakeTask=$null
+    Stop-V6Task
+    Assert ($null -eq $FakeTask) 'fresh install without existing task is supported'
     Invoke-V6On
     Assert ($FakeWrites -eq 0) 'manual On outside campus has no network writes'
     Assert (-not (Test-Path $Marker)) 'outside campus has no active marker'
@@ -80,6 +90,16 @@ try {
     (Get-Date).AddSeconds(-1).ToString('o') | Set-Content $SuspendFlg
     Assert (-not (Test-Suspended $SuspendFlg)) 'pause expires'
     Assert (-not (Test-Path $SuspendFlg)) 'expired pause removed'
+    $FakeDns=@('240c::6666','202.112.128.50','2400:3200::1')
+    New-Item -ItemType File -Path $Marker | Out-Null
+    Invoke-V6On
+    Assert ((Get-Content $Snapshot -Raw | ConvertFrom-Json).AutomaticDns) 'known legacy default migrates to DHCP restoration'
+    Invoke-V6Off -Automatic
+    Assert (($FakeDns -join ',') -eq '192.168.1.1') 'leaving campus after upgrade restores network DHCP DNS'
+    $FakeDns=@('240c::6666','202.112.128.50','2400:3200::1')
+    Invoke-V6On
+    Assert (-not (Get-Content $Snapshot -Raw | ConvertFrom-Json).AutomaticDns) 'matching user DNS without a legacy marker is preserved'
+    Invoke-V6Off -Automatic
     Write-Host "PASS: $checks Windows campus/controller regression checks"
 } finally {
     Remove-Item $temp -Recurse -Force
