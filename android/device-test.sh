@@ -13,6 +13,9 @@ if [[ -n "${V6ONLY_KEYSTORE:-}" ]]; then
   echo 'Device tests use the local debug key; unset V6ONLY_KEYSTORE.' >&2
   exit 1
 fi
+# The fixture lives on emulator loopback. Public captive-portal probes can be
+# unreachable on CI and disable AndroidWifi auto-join before the app even starts.
+"${ADB[@]}" shell settings put global captive_portal_mode 0
 if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel || ${V6ONLY_TEST_SUITE:-network} == handover ]]; then export V6ONLY_TEST_FIXTURE=1; fi
 bash "$PROJ/build-apk.sh"
 OUT="$PROJ/build/device-tests"

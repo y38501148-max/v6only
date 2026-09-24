@@ -36,7 +36,11 @@ public final class HandoverSmoke extends Instrumentation {
                     "edu.buaa.v6only.HandoverActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             shell("svc data enable");
             for(boolean automatic:new boolean[]{true,false}) {
-                shell("svc wifi enable");await(()->transport(NetworkCapabilities.TRANSPORT_WIFI),"Wi-Fi default");
+                shell("svc wifi enable");
+                // Reselect the controlled AP if a prior public validation failure
+                // disabled auto-join in a fresh Android 15+ emulator.
+                if(android.os.Build.VERSION.SDK_INT>=35) shell("cmd wifi connect-network AndroidWifi open");
+                await(()->transport(NetworkCapabilities.TRANSPORT_WIFI),"Wi-Fi default");
                 prefs.edit().putBoolean("enabled",false).putBoolean("auto",automatic).commit();
                 command(V6VpnService.ACTION_START);
                 await(()->V6VpnServiceExt.running(context)&&transport(NetworkCapabilities.TRANSPORT_VPN),"campus VPN established");

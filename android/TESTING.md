@@ -25,6 +25,8 @@ ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a V6ONLY_TEST_SUITE=han
 
 The handover fixture uses an inert foreground activity so `MainActivity.onResume` cannot start a second controller beside the fixture service. Cellular startup still exercises the real UI. Fresh emulator modem registration is a precondition checked before starting the app, separately from the shorter service assertions. Handover HTTP recovery is bounded and its latency is printed; sustained failures retain connectivity, route and logcat diagnostics.
 
+The disposable device script disables public captive-portal probes and explicitly reconnects the controlled AndroidWifi AP on newer emulators. CI public-probe availability must not decide whether this loopback-only fixture can establish its pre-test Wi-Fi default. These settings affect only the disposable emulator, not the host or production APK.
+
 ## Real native tunnel integration
 
 ```sh
