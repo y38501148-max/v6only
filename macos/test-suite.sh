@@ -30,9 +30,9 @@ printf '系统代理设置（代理出口协议需另行检查）：\n'
 scutil --proxy
 if [[ "${1:-}" != --offline ]]; then
     check '首选 DNS 能返回公网 AAAA 记录' dns_probe
-    check '公网 IPv4 可用' probe -4 https://www.baidu.com/
+    check 'IPv4 应用请求可经核心转发' probe -4 https://www.baidu.com/
     check '公网 IPv6 可用' probe -6 https://www.bilibili.com/
     check '校园网关可用' probe -4 https://gw.buaa.edu.cn/
 fi
-printf '失败项：%s。连接成功不代表所有应用都使用 IPv6。\n' "$FAIL"
+printf '失败项：%s。实际出口可在本地 /flows 中核对；应用看到的虚拟 IP 不代表出口协议。\n' "$FAIL"
 exit "$FAIL"

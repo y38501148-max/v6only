@@ -11,6 +11,13 @@ watch_once() {
     [[ "$now" -ge "$NEXT_RETRY" ]] || return 0
     if campus; then
         configuration_active && return 0
+        # A broken running core must restore connectivity, not repeatedly seize
+        # the same network. Manual on can resume after the fault is investigated.
+        if [[ -f "$MARKER" ]] && ! core_active; then
+            /bin/bash "$V6_DIR/v6ctl.sh" off >> "$LOG" 2>&1 || return 1
+            log 'forwarding core lost → restored system network and paused'
+            return 0
+        fi
         if /bin/bash "$V6_DIR/v6ctl.sh" on >> "$LOG" 2>&1; then
             log 'campus detected → configuration applied'
         else

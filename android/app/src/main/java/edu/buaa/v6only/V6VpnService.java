@@ -20,7 +20,7 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 
-/** DNS configuration VPN. All real traffic uses Android's native IP/TCP/UDP stack. */
+/** Campus-only VPN with IPv6-before-IPv4 forwarding over protected physical sockets. */
 public class V6VpnService extends VpnService {
     public static final String ACTION_START = "edu.buaa.v6only.START";
     public static final String ACTION_STOP = "edu.buaa.v6only.STOP";
@@ -36,6 +36,7 @@ public class V6VpnService extends VpnService {
     private String configuration = "";
     private boolean destroyed;
     private boolean stopping;
+    private volatile Network coreNetwork;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -111,32 +112,30 @@ public class V6VpnService extends VpnService {
             return;
         }
         try {
-            Builder builder = new Builder().setSession("v6only · IPv6 优先")
+            // Tear down the old stack before replacing its TUN or physical network.
+            closeTun();
+            coreNetwork = state.network;
+            Builder builder = new Builder().setSession("v6only · IPv6 优先转发")
                     .setMtu(1500)
-                    .addAddress("192.0.2.1", 32)
-                    // Not adding IPv6 addresses/routes alone would BLOCK IPv6. Both families
-                    // must be allowed explicitly so unmatched traffic falls through natively.
-                    .allowFamily(OsConstants.AF_INET)
-                    .allowFamily(OsConstants.AF_INET6)
+                    .addAddress("198.18.0.1", 15)
+                    .addAddress("fd00:198:18::1", 64)
+                    .addRoute("0.0.0.0", 0)
+                    .addRoute("::", 0)
+                    .addDnsServer("198.18.0.2")
                     .setMetered(metered)
                     .setUnderlyingNetworks(new Network[]{state.network})
                     .setConfigureIntent(openActivity());
-            for (InetAddress address : dns) builder.addDnsServer(address);
-            String domains = state.links.getDomains();
-            if (domains != null) {
-                for (String domain : domains.trim().split("\\s+")) {
-                    if (!domain.isEmpty()) builder.addSearchDomain(domain);
-                }
-            }
-            // No default route, fake DNS, exclusion whitelist, or TUN packet echo. Android
-            // reaches these real resolvers (including TCP/Private DNS) on the physical network.
             ParcelFileDescriptor next = builder.establish();
             if (next == null) throw new IOException("VPN authorization was revoked");
-            closeTun();
             tun = next;
+            org.json.JSONArray servers = new org.json.JSONArray();
+            for (InetAddress address : dns) servers.put(address.getHostAddress());
+            org.json.JSONObject config = new org.json.JSONObject().put("dns", servers).put("fake_dns", true);
+            String error = CoreNative.start(next.getFd(), config.toString(), this);
+            if (!error.isEmpty()) throw new IOException(error);
             configuration = key;
             V6VpnServiceExt.setRunning(true);
-            Log.i("V6VpnService", "DNS VPN established on " + state.network + ", DNS=" + dns);
+            Log.i("V6VpnService", "IPv6 forwarding VPN established on " + state.network + ", DNS=" + dns);
             publish(automatic ? "自动模式：校园网已连接" : "手动模式：已连接");
         } catch (Exception error) {
             // Fail open: never leave a broken tunnel behind and black-hole browser traffic.
@@ -172,7 +171,19 @@ public class V6VpnService extends VpnService {
         sendBroadcast(new Intent(ACTION_STATUS).setPackage(getPackageName()));
     }
 
+    // JNI uses this for every outbound socket, including DNS, to prevent VPN loops.
+    public boolean protectCoreSocket(int fd) {
+        Network physical = coreNetwork;
+        if (physical == null || !protect(fd)) return false;
+        try (ParcelFileDescriptor copy = ParcelFileDescriptor.fromFd(fd)) {
+            physical.bindSocket(copy.getFileDescriptor());
+            return true;
+        } catch (IOException error) { return false; }
+    }
+
     private void closeTun() {
+        CoreNative.stop();
+        coreNetwork = null;
         if (tun != null) {
             try { tun.close(); } catch (IOException error) { Log.w("V6VpnService", "Close TUN", error); }
             tun = null;

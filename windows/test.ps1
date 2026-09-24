@@ -23,11 +23,15 @@ $temp = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
 New-Item -ItemType Directory $temp | Out-Null
 $Marker=Join-Path $temp 'active'; $Snapshot=Join-Path $temp 'original.json'
 $SuspendFlg=Join-Path $temp 'suspend'; $LogFile=Join-Path $temp 'log'
-$ManagedDns=@('202.112.128.50','202.112.128.51','2400:3200::1')
+$ManagedDns=@('202.112.128.50','202.112.128.51')
 $BlockedDnsV4=@('8.8.8.8','8.8.4.4','1.1.1.1','9.9.9.9')
 $Watch=$true; $Suspend=$null
 $FakeAdapter=[pscustomobject]@{ifIndex=7;Name='Wi-Fi';InterfaceGuid=[guid]::Empty;Status='Up';HardwareInterface=$true}
 $FakeDhcp='10.0.0.1'; $FakeDns=@('9.9.9.9'); $FakeWrites=0; $FakeRules=@{}
+$FakeCore=$false
+function Test-CoreActive { return $FakeCore }
+function Start-V6Core { $script:FakeCore=$true }
+function Stop-V6Core { $script:FakeCore=$false }
 function Write-Log($msg) {}
 function Get-ActiveAdapter { return $FakeAdapter }
 function Get-NetAdapter { return $FakeAdapter }

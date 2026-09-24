@@ -3,10 +3,22 @@ name: v6only-ci
 on: [push, pull_request, workflow_dispatch]
 
 jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: core/go.mod, cache-dependency-path: core/go.sum}
+      - run: cd core && go test -race ./... && go vet ./...
+      - name: Isolated network namespaces, real TUN TCP/UDP and failure recovery
+        run: sudo -E env "PATH=$PATH" V6ONLY_DISPOSABLE_NETWORK=1 bash tests/tunnel-linux.sh
+
   syntax-and-logic:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: core/go.mod, cache-dependency-path: core/go.sum}
 
       - name: PowerShell 语法解析检查
         shell: pwsh
@@ -37,6 +49,9 @@ jobs:
       - name: 校园边界与设置回滚回归测试（模拟系统 API）
         shell: pwsh
         run: ./windows/test.ps1
+      - name: Disposable VM actual Wintun and failure recovery
+        shell: pwsh
+        run: ./windows/integration-test.ps1
 
       - name: 防火墙封堵逻辑等价性验证（真实 Windows 防火墙 API）
         shell: pwsh
@@ -121,21 +136,29 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: core/go.mod, cache-dependency-path: core/go.sum}
       - name: 系统 Bash 兼容性和回归测试
         run: |
           for f in macos/*.sh; do /bin/bash -n "$f"; done
           python3 -m unittest discover -s tests -v
       - name: PF 规则解析（仅检查，不加载）
         run: sudo pfctl -n -a com.apple/v6only -f macos/anchor-v6only
+      - name: Disposable VM actual utun, dual-stack and exit recovery
+        run: sudo -E env "PATH=$PATH" bash tests/tunnel-macos.sh
 
   android-build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: core/go.mod, cache-dependency-path: core/go.sum}
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
       - name: Build and verify Android APK
-        run: bash android/build-apk.sh
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.13846066'
+          bash android/build-apk.sh
       - name: Campus detection and mode regression tests
         run: bash android/test.sh
       - uses: actions/upload-artifact@v4

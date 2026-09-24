@@ -7,3 +7,7 @@ android/build/
 __pycache__/
 *.pyc
 *.apk.idsig
+
+macos/v6core
+windows/v6core.exe
+windows/wintun.dll

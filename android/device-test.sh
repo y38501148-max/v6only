@@ -13,11 +13,17 @@ if [[ -n "${V6ONLY_KEYSTORE:-}" ]]; then
   echo 'Device tests use the local debug key; unset V6ONLY_KEYSTORE.' >&2
   exit 1
 fi
+if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel ]]; then export V6ONLY_TEST_FIXTURE=1; fi
 bash "$PROJ/build-apk.sh"
 OUT="$PROJ/build/device-tests"
 mkdir -p "$OUT/obj" "$OUT/apk" "$OUT/web"
 printf 'v6only network regression fixture\n' > "$OUT/web/marker"
-(cd "$OUT/web" && exec python3 "$PROJ/tests/device/network-fixture.py") > "$OUT/http.log" 2>&1 &
+if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel ]]; then
+  (cd "$PROJ/../core" && go build -o "$OUT/netfixture" ./cmd/netfixture)
+  "$OUT/netfixture" --listen4 127.0.0.1 --listen6 ::1 --v4 10.0.2.2 --v6 fec0::2 --bad6 fec0::bad > "$OUT/http.log" 2>&1 &
+else
+  (cd "$OUT/web" && exec python3 "$PROJ/tests/device/network-fixture.py") > "$OUT/http.log" 2>&1 &
+fi
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 # Fail before running the app if either fixture could not bind.
@@ -34,14 +40,21 @@ find "$OUT/obj" -name '*.class' > "$OUT/classes.txt"
 "$BT/zipalign" -f 4 "$OUT/apk/base.apk" "$OUT/apk/aligned.apk"
 "$BT/apksigner" sign --ks "$PROJ/debug.keystore" --ks-pass pass:v6only \
   --v4-signing-enabled false --out "$OUT/tests.apk" "$OUT/apk/aligned.apk"
-"${ADB[@]}" install --no-incremental -r "$PROJ/v6only.apk"
+APK="$PROJ/v6only.apk"
+[[ ${V6ONLY_TEST_SUITE:-network} != tunnel ]] || APK="$PROJ/v6only-fixture.apk"
+"${ADB[@]}" install --no-incremental -r "$APK"
 "${ADB[@]}" install --no-incremental -r "$OUT/tests.apk"
 "${ADB[@]}" shell appops set edu.buaa.v6only ACTIVATE_VPN allow
 "${ADB[@]}" shell pm grant edu.buaa.v6only android.permission.POST_NOTIFICATIONS || true
 case "${V6ONLY_TEST_SUITE:-network}" in
-  network|ui|all) ;;
-  *) echo 'V6ONLY_TEST_SUITE must be network, ui or all.' >&2; exit 1 ;;
+  network|ui|all|tunnel) ;;
+  *) echo 'V6ONLY_TEST_SUITE must be network, ui, all or tunnel.' >&2; exit 1 ;;
 esac
+if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel ]]; then
+  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.TunnelSmoke | tee "$OUT/result.txt"
+  grep -q 'PASS: Android native tunnel integration' "$OUT/result.txt"
+  exit
+fi
 if [[ "${V6ONLY_TEST_SUITE:-network}" != ui ]]; then
   "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.NetworkSmoke | tee "$OUT/result.txt"
   grep -q 'PASS: all Android device regression checks' "$OUT/result.txt"

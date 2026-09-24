@@ -34,7 +34,10 @@ $SuspendFlg = "$env:ProgramData\v6only\suspend.flag"
 $LogFile    = "$env:ProgramData\v6only\v6only.log"
 $DnsV6Primary = '2400:3200::1'        # Public fallback; DNS transport does not force IPv6
 $Snapshot = "$env:ProgramData\v6only\original.json"
-$ManagedDns = @('202.112.128.50','202.112.128.51','2400:3200::1')
+$ManagedDns = @('202.112.128.50','202.112.128.51')
+$CoreDir = $PSScriptRoot
+$CoreReady = Join-Path (Split-Path $Marker) 'core.ready'
+$CoreState = Join-Path (Split-Path $Marker) 'core-process.json'
 $DnsCampusV4  = '202.112.128.50'      # 校园 v4 兜底（v4-only 域名查 A）
 $BlockedDnsV4 = @('8.8.8.8','8.8.4.4','1.1.1.1','9.9.9.9')  # 外部 v4 明文 DNS 封堵名单
 
@@ -59,6 +62,64 @@ function Stop-V6Task([string]$TaskName = 'v6only-watch') {
 
 function Test-LegacyDns([string[]]$Dns) {
     return (($Dns | Sort-Object) -join ',') -eq '202.112.128.50,2400:3200::1,240c::6666'
+}
+
+function Test-CoreActive {
+    if (-not (Test-Path $CoreReady) -or -not (Test-Path $CoreState)) { return $false }
+    try {
+        $saved = Get-Content $CoreState -Raw | ConvertFrom-Json
+        $process = Get-Process -Id $saved.Pid -ErrorAction Stop
+        if ($process.StartTime.ToUniversalTime().Ticks -ne $saved.StartTicks) { return $false }
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:17890/health' -TimeoutSec 2
+        $tun = Get-NetAdapter -Name 'v6only-tun' -ErrorAction Stop
+        $routes = @(Get-NetRoute -InterfaceIndex $tun.ifIndex -ErrorAction Stop)
+        return $health.policy -eq 'ipv6-before-ipv4' -and
+            @($routes | Where-Object DestinationPrefix -in @('0.0.0.0/1','128.0.0.0/1','::/1','8000::/1')).Count -eq 4
+    } catch { return $false }
+}
+
+function Stop-V6Core {
+    if (Test-Path $CoreState) {
+        $saved = Get-Content $CoreState -Raw | ConvertFrom-Json
+        $process = Get-Process -Id $saved.Pid -ErrorAction SilentlyContinue
+        if ($process -and $process.StartTime.ToUniversalTime().Ticks -eq $saved.StartTicks -and $process.ProcessName -eq 'v6core') {
+            Stop-Process -Id $saved.Pid -Force
+            Wait-Process -Id $saved.Pid -Timeout 10 -ErrorAction SilentlyContinue
+        }
+    }
+    # Routes belong exclusively to the named adapter owned by this program.
+    $tun = Get-NetAdapter -Name 'v6only-tun' -ErrorAction SilentlyContinue
+    if ($tun) { Get-NetRoute -InterfaceIndex $tun.ifIndex -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue }
+    Remove-Item $CoreReady,$CoreState -Force -ErrorAction SilentlyContinue
+}
+
+function Start-V6Core($Adapter) {
+    if (Test-CoreActive) { return }
+    foreach ($file in @('v6core.exe','wintun.dll')) {
+        if (-not (Test-Path (Join-Path $CoreDir $file))) { throw "Missing release component: $file" }
+    }
+    Stop-V6Core
+    $args = '--interface "' + $Adapter.Name + '" --device v6only-tun --dns 202.112.128.50,202.112.128.51 --ready "' + $CoreReady + '"'
+    $process = Start-Process -FilePath (Join-Path $CoreDir 'v6core.exe') -ArgumentList $args -WorkingDirectory $CoreDir -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput (Join-Path (Split-Path $Marker) 'core.log') -RedirectStandardError (Join-Path (Split-Path $Marker) 'core-error.log')
+    @{Pid=$process.Id;StartTicks=$process.StartTime.ToUniversalTime().Ticks} | ConvertTo-Json | Set-Content $CoreState
+    for ($i=0; $i -lt 40; $i++) {
+        if (Test-Path $CoreReady) { break }
+        if ($process.HasExited) { throw 'Forwarding core exited during start' }
+        Start-Sleep -Milliseconds 250
+    }
+    if (-not (Test-Path $CoreReady)) { throw 'Forwarding core readiness timeout' }
+    $tun = Get-NetAdapter -Name 'v6only-tun' -ErrorAction Stop
+    Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv4 -Dhcp Disabled
+    New-NetIPAddress -InterfaceIndex $tun.ifIndex -IPAddress '198.18.0.1' -PrefixLength 24 | Out-Null
+    New-NetIPAddress -InterfaceIndex $tun.ifIndex -IPAddress 'fd00:198:18::1' -PrefixLength 64 | Out-Null
+    foreach ($prefix in @('0.0.0.0/1','128.0.0.0/1')) {
+        New-NetRoute -InterfaceIndex $tun.ifIndex -DestinationPrefix $prefix -NextHop '0.0.0.0' -RouteMetric 1 -PolicyStore ActiveStore | Out-Null
+    }
+    foreach ($prefix in @('::/1','8000::/1')) {
+        New-NetRoute -InterfaceIndex $tun.ifIndex -DestinationPrefix $prefix -NextHop '::' -RouteMetric 1 -PolicyStore ActiveStore | Out-Null
+    }
+    if (-not (Test-CoreActive)) { throw 'Forwarding core route verification failed' }
 }
 
 function Get-ActiveAdapter {
@@ -119,7 +180,7 @@ function Invoke-V6On {
     $udp = Get-NetFirewallRule -DisplayName 'v6only-block-external-dns' -ErrorAction SilentlyContinue
     $tcp = Get-NetFirewallRule -DisplayName 'v6only-block-external-dns-tcp' -ErrorAction SilentlyContinue
     if ($state -and ($current -join ',') -eq ($ManagedDns -join ',') -and
-        $udp.Enabled -eq 'True' -and $tcp.Enabled -eq 'True' -and (Test-Path $Marker)) {
+        $udp.Enabled -eq 'True' -and $tcp.Enabled -eq 'True' -and (Test-Path $Marker) -and (Test-CoreActive)) {
         Remove-Item $SuspendFlg -Force -ErrorAction SilentlyContinue
         return
     }
@@ -141,6 +202,7 @@ function Invoke-V6On {
     $state.AppliedDns = $ManagedDns
     $state | ConvertTo-Json | Set-Content $Snapshot -Encoding UTF8
     try {
+        Start-V6Core $adapter
         Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $ManagedDns
         foreach ($protocol in @('UDP','TCP')) {
             $name = if ($protocol -eq 'UDP') { 'v6only-block-external-dns' } else { 'v6only-block-external-dns-tcp' }
@@ -157,7 +219,7 @@ function Invoke-V6On {
         Invoke-V6Off -Automatic
         throw
     }
-    if (-not $Watch) { Write-Host '已应用校园双栈配置；IPv4/IPv6 由系统及应用选择。' }
+    if (-not $Watch) { Write-Host '已应用 IPv6 优先转发；IPv6 全部失败后才回退 IPv4。' }
 }
 
 function Invoke-V6Off([switch]$Automatic) {
@@ -179,6 +241,7 @@ function Invoke-V6Off([switch]$Automatic) {
             }
         }
     }
+    Stop-V6Core
     Get-NetFirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
     Remove-Item $Marker,$Snapshot -Force -ErrorAction SilentlyContinue
     if (-not $Automatic) {
@@ -218,9 +281,7 @@ function Invoke-Test {
           Where-Object IPAddress -match '^[23][0-9a-fA-F]{3}:' | Select-Object -First 1
     if ($v6) { Ok "全球 v6 = $($v6.IPAddress)" } else { Bad "无 2001:: v6 地址" }
 
-    $dns = (Get-DnsClientServerAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue |
-            Where-Object ServerAddresses).ServerAddresses
-    if ($dns -contains $DnsV6Primary) { Ok "DNS 上游含 v6 ($DnsV6Primary)" } else { Bad "DNS 未配置 v6 上游: $dns" }
+    if (Test-CoreActive) { Ok 'IPv6 优先转发核心和路由就绪' } else { Bad '转发核心未完整运行' }
 
     try {
         $r = Resolve-DnsName www.edu.cn -Type AAAA -Server $DnsCampusV4 -DnsOnly -ErrorAction Stop
@@ -253,10 +314,17 @@ switch ($true) {
     $Off       { Invoke-V6Off }
     $Install {
         Stop-V6Task
+        if ((Test-Path $Snapshot) -or (Test-Path $CoreState)) { Invoke-V6Off -Automatic }
+        foreach ($file in @('v6core.exe','wintun.dll')) {
+            if (-not (Test-Path (Join-Path $PSScriptRoot $file))) { throw "Missing release component: $file" }
+        }
         $installDir = Split-Path $Marker
         New-Item -ItemType Directory -Force -Path $installDir | Out-Null
         $installedScript = Join-Path $installDir 'v6only.ps1'
         if ($PSCommandPath -ne $installedScript) { Copy-Item -LiteralPath $PSCommandPath -Destination $installedScript -Force }
+        foreach ($file in @('v6core.exe','wintun.dll')) {
+            if ($PSScriptRoot -ne $installDir) { Copy-Item (Join-Path $PSScriptRoot $file) (Join-Path $installDir $file) -Force }
+        }
         & icacls $installDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Cannot secure the SYSTEM task installation directory.' }
         # 计划任务：开机 + 每 5 分钟自愈（错过的开机触发由循环触发补上）
@@ -293,7 +361,10 @@ switch ($true) {
                 if (-not $campus -and ((Test-Path $Marker) -or (Test-Path $Snapshot))) {
                     Invoke-V6Off -Automatic
                 } elseif ($campus -and -not (Test-Suspended $SuspendFlg)) {
-                    Invoke-V6On
+                    if ((Test-Path $Marker) -and -not (Test-CoreActive)) {
+                        Invoke-V6Off
+                        Write-Log 'Forwarding core lost; restored system network and paused'
+                    } else { Invoke-V6On }
                 }
                 Start-Sleep -Seconds 20
             } catch {
