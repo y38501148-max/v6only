@@ -33,7 +33,11 @@ final class CampusWatcher {
             this.capabilities = capabilities;
             this.campusReason = campusReason;
         }
-        boolean isCampus() { return !campusReason.isEmpty(); }
+        boolean isCampus() {
+            return network != null && links != null && isPhysical(capabilities)
+                    && campusTransport(capabilities)
+                    && !campusReason.isEmpty();
+        }
     }
 
     private static final class Entry {
@@ -48,7 +52,9 @@ final class CampusWatcher {
     private final Listener listener;
     private final Map<Network, Entry> networks = new LinkedHashMap<>();
     private final Runnable evaluate = this::evaluate;
-    private ConnectivityManager.NetworkCallback callback;
+    private ConnectivityManager.NetworkCallback callback, defaultCallback, bestCallback;
+    private Network bestPhysical;
+    private boolean bestInitialized;
 
     CampusWatcher(Context context, Handler handler, Listener listener) {
         this.context = context;
@@ -79,6 +85,31 @@ final class CampusWatcher {
                 networks.put(network, entry);
             }
         }
+        defaultCallback = new ConnectivityManager.NetworkCallback() {
+            @Override public void onAvailable(Network n) { refresh(); }
+            @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities caps) { refresh(); }
+            @Override public void onLost(Network n) { refresh(); }
+        };
+        cm.registerDefaultNetworkCallback(defaultCallback, handler);
+        if (Build.VERSION.SDK_INT >= 31) {
+            bestCallback = new ConnectivityManager.NetworkCallback() {
+                @Override public void onAvailable(Network n) {
+                    if (bestCallback != this) return;
+                    bestInitialized = true;
+                    bestPhysical = n; refresh();
+                }
+                @Override public void onLost(Network n) {
+                    if (bestCallback != this) return;
+                    bestInitialized = true;
+                    if (n.equals(bestPhysical)) bestPhysical = null;
+                    refresh();
+                }
+            };
+            // Follow Android's choice even while our own VPN is the app's default.
+            cm.registerBestMatchingNetworkCallback(new NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), bestCallback, handler);
+        }
         refresh();
     }
 
@@ -86,19 +117,23 @@ final class CampusWatcher {
         Callback() { super(); }
         Callback(int flags) { super(flags); }
         @Override public void onAvailable(Network n) {
+            if (callback != this) return;
             if (!networks.containsKey(n)) networks.put(n, new Entry());
         }
         @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities caps) {
+            if (callback != this) return;
             if (!networks.containsKey(n)) networks.put(n, new Entry());
             networks.get(n).capabilities = caps;
             refresh();
         }
         @Override public void onLinkPropertiesChanged(Network n, LinkProperties links) {
+            if (callback != this) return;
             if (!networks.containsKey(n)) networks.put(n, new Entry());
             networks.get(n).links = links;
             refresh();
         }
         @Override public void onLost(Network n) {
+            if (callback != this) return;
             networks.remove(n);
             refresh();
         }
@@ -106,13 +141,17 @@ final class CampusWatcher {
 
     void refresh() {
         handler.removeCallbacks(evaluate);
-        handler.postDelayed(evaluate, 100);
+        if (callback != null) handler.post(evaluate);
     }
 
     void stop() {
         handler.removeCallbacks(evaluate);
         if (callback != null) cm.unregisterNetworkCallback(callback);
-        callback = null;
+        if (defaultCallback != null) cm.unregisterNetworkCallback(defaultCallback);
+        if (bestCallback != null) cm.unregisterNetworkCallback(bestCallback);
+        callback = defaultCallback = bestCallback = null;
+        bestPhysical = null;
+        bestInitialized = false;
         networks.clear();
     }
 
@@ -121,15 +160,44 @@ final class CampusWatcher {
                 && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
     }
 
+    private static boolean campusTransport(NetworkCapabilities caps) {
+        return CampusPolicy.campusTransport(caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI),
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN));
+    }
+
+    static boolean cellularDefault(Context context) {
+        ConnectivityManager cm = context.getSystemService(ConnectivityManager.class);
+        Network active = cm.getActiveNetwork();
+        NetworkCapabilities caps = active == null ? null : cm.getNetworkCapabilities(active);
+        return isPhysical(caps) && caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR);
+    }
+
     private void evaluate() {
+        if (callback == null) return;
+        Network active = cm.getActiveNetwork();
+        // A cellular default wins even if an old campus Wi-Fi is still in the map.
+        if (active != null && isPhysical(cm.getNetworkCapabilities(active))) {
+            deliver(active, networks.get(active));
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 31) {
+            // Re-registering on Activity resume must not drop a healthy VPN while
+            // waiting for the initial best-match callback. A real loss still closes it.
+            if (!bestInitialized && networks.values().stream().anyMatch(e -> isPhysical(e.capabilities)
+                    && e.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))) return;
+            deliver(bestPhysical, networks.get(bestPhysical));
+            return;
+        }
         Network best = null;
         Entry selected = null;
         int bestScore = -1;
         // Executed after callback dispatch, not from inside the callback itself.
-        Network active = cm.getActiveNetwork();
         for (Map.Entry<Network, Entry> item : networks.entrySet()) {
             Entry entry = item.getValue();
-            if (entry.links == null || !isPhysical(entry.capabilities)) continue;
+            if (entry.links == null || !isPhysical(entry.capabilities)
+                    || !entry.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) continue;
             NetworkCapabilities caps = entry.capabilities;
             int score = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? 100 : 0;
             if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) score += 200;
@@ -144,14 +212,18 @@ final class CampusWatcher {
                 selected = entry;
             }
         }
-        listener.onNetworkChanged(selected == null ? new State(null, null, null, "")
-                : new State(best, selected.links, selected.capabilities, match(selected)));
+        deliver(best, selected);
+    }
+
+    private void deliver(Network network, Entry entry) {
+        listener.onNetworkChanged(entry == null || entry.links == null || !isPhysical(entry.capabilities)
+                ? new State(null, null, null, "")
+                : new State(network, entry.links, entry.capabilities, match(entry)));
     }
 
     private String match(Entry entry) {
         NetworkCapabilities caps = entry.capabilities;
-        if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-                && !caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return "";
+        if (!campusTransport(caps)) return "";
         for (InetAddress dns : entry.links.getDnsServers()) {
             if (CampusPolicy.matchesDns(dns.getHostAddress())) return "校园 DNS";
         }

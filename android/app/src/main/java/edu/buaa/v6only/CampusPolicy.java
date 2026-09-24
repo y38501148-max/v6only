@@ -25,6 +25,10 @@ final class CampusPolicy {
         return value.equals("BUAA") || value.startsWith("BUAA-") || value.startsWith("BUAA_");
     }
 
+    static boolean campusTransport(boolean wifi, boolean ethernet, boolean cellular, boolean vpn) {
+        return (wifi || ethernet) && !cellular && !vpn;
+    }
+
     static boolean shouldConnect(boolean enabled, boolean automatic,
                                  boolean campus, boolean networkAvailable) {
         // Manual mode must not apply campus DNS/VPN policy on ordinary networks.

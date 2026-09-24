@@ -74,13 +74,17 @@ public class MainActivity extends Activity {
             if (width > 0 && params.width != width) { params.width = width; content.setLayoutParams(params); }
         });
         toggle.setOnClickListener(view -> {
-            if (prefs.getBoolean("enabled", false) || V6VpnServiceExt.monitoring()) {
+            if (V6VpnServiceExt.permissionRequired() && V6VpnServiceExt.campus()) {
+                // Consent is requested only after the service identifies a campus network.
+                if (CampusWatcher.cellularDefault(this)) { sendCommand(V6VpnService.ACTION_APPLY); return; }
+                Intent permission = VpnService.prepare(this);
+                if (permission == null) sendCommand(V6VpnService.ACTION_APPLY);
+                else startActivityForResult(permission, VPN_PERMISSION);
+            } else if (prefs.getBoolean("enabled", false) || V6VpnServiceExt.monitoring()) {
                 prefs.edit().putBoolean("enabled", false).commit();
                 userCommand(false);
             } else {
-                Intent permission = VpnService.prepare(this);
-                if (permission == null) startVpn();
-                else startActivityForResult(permission, VPN_PERMISSION);
+                startVpn();
             }
         });
         modes.setOnCheckedChangeListener((group, checkedId) -> {
@@ -198,7 +202,7 @@ public class MainActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request == VPN_PERMISSION && result == RESULT_OK) startVpn();
         else if (request == VPN_PERMISSION) {
-            Toast.makeText(this, "尚未授权 VPN，服务未启动", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "尚未授权 VPN，保持网络监听", Toast.LENGTH_SHORT).show();
             refresh();
         }
     }
@@ -258,6 +262,8 @@ public class MainActivity extends Activity {
             showState(pending && !pendingStart ? "正在停止" : "正在启动", "正在更新服务状态，请稍候。", "处理中", neutral, Color.WHITE);
         } else if (connected) {
             showState("连接已开启", "服务已在后台运行，退出界面后继续保持。", "已连接", Color.rgb(162, 236, 214), Color.rgb(12, 65, 59));
+        } else if (monitoring && V6VpnServiceExt.permissionRequired()) {
+            showState("等待 VPN 授权", "已识别校园网。授权后开始连接；当前保持系统网络。", "待授权", neutral, Color.WHITE);
         } else if (monitoring) {
             String message = V6VpnServiceExt.message();
             if (message.contains("失败") || message.contains("DNS")) {
@@ -276,6 +282,7 @@ public class MainActivity extends Activity {
         toggle.setEnabled(!pending);
         toggle.setAlpha(pending ? 0.65f : 1f);
         toggle.setText(pending ? (pendingStart ? "正在启动…" : "正在停止…")
+                : V6VpnServiceExt.permissionRequired() ? "授权并连接"
                 : enabled || monitoring ? "停止服务" : "启动服务");
         network.setText("校园网  ·  " + (!monitoring ? "启动后识别" : V6VpnServiceExt.campus()
                 ? "已识别（" + V6VpnServiceExt.reason() + "）" : "暂未识别"));

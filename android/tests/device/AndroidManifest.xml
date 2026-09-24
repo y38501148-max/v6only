@@ -1,8 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="edu.buaa.v6only.tests">
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34"/>
     <uses-permission android:name="android.permission.INTERNET"/>
-    <application android:label="v6only regression tests"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <application android:label="v6only regression tests">
+        <activity android:name=".OtherVpnActivity" android:exported="true"/>
+        <service android:name=".OtherVpn" android:exported="true" android:permission="android.permission.BIND_VPN_SERVICE" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Disposable emulator VPN coexistence regression"/>
+            <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false"/>
+            <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
+        </service>
+    </application>
     <instrumentation android:name=".NetworkSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".UiSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".TunnelSmoke" android:targetPackage="edu.buaa.v6only"/>
+    <instrumentation android:name=".CellularSmoke" android:targetPackage="edu.buaa.v6only"/>
+    <instrumentation android:name=".HandoverSmoke" android:targetPackage="edu.buaa.v6only"/>
+    <instrumentation android:name=".OtherVpnSmoke" android:targetPackage="edu.buaa.v6only"/>
 </manifest>
