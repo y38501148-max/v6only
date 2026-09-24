@@ -32,6 +32,7 @@ $FakeCore=$false
 function Test-CoreActive { return $FakeCore }
 function Start-V6Core { $script:FakeCore=$true }
 function Stop-V6Core { $script:FakeCore=$false }
+function Test-Forwarding { if ($script:FailForwarding) { throw 'Simulated forwarding failure' } }
 function Write-Log($msg) {}
 function Get-ActiveAdapter { return $FakeAdapter }
 function Get-NetAdapter { return $FakeAdapter }
@@ -104,6 +105,15 @@ try {
     Invoke-V6On
     Assert (-not (Get-Content $Snapshot -Raw | ConvertFrom-Json).AutomaticDns) 'matching user DNS without a legacy marker is preserved'
     Invoke-V6Off -Automatic
+    $script:FailForwarding=$true
+    $beforeDns=$FakeDns -join ','
+    $failed=$false
+    try { Invoke-V6On } catch { $failed=$true }
+    Assert $failed 'end-to-end failure refuses activation'
+    Assert (($FakeDns -join ',') -eq $beforeDns) 'end-to-end failure restores previous DNS'
+    Assert (-not $FakeCore -and -not (Test-Path $Marker)) 'failure stops core and clears active marker'
+    Assert (Test-Suspended $SuspendFlg) 'failure prevents automatic repeated takeovers'
+    $script:FailForwarding=$false
     Write-Host "PASS: $checks Windows campus/controller regression checks"
 } finally {
     Remove-Item $temp -Recurse -Force

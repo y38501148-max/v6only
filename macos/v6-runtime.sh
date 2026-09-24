@@ -2,7 +2,7 @@
 CORE_LABEL=edu.buaa.v6only-core
 CORE_READY="$STATE_DIR/core.ready"
 setup_physical_routes() {
-    local family gateway prefix
+    local family gateway prefix prefixes
     mkdir -p "$STATE_DIR"
     for family in inet inet6; do
         gateway=$(route -n get -"$family" -ifscope "$IFACE" default 2>/dev/null | awk '/gateway:/{print $2}')
@@ -44,7 +44,18 @@ validate_forwarding() {
     done
 }
 stop_core() {
+    local pid _attempt
+    pid=$(sed -n 's/.*"pid":\([0-9]*\).*/\1/p' "$CORE_READY" 2>/dev/null || true)
     if launchctl print "system/$CORE_LABEL" >/dev/null 2>&1; then launchctl bootout "system/$CORE_LABEL"; fi
+    if [[ "$pid" =~ ^[0-9]+$ ]]; then
+        for _attempt in {1..50}; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.1
+        done
+        if kill -0 "$pid" 2>/dev/null && [[ $(ps -p "$pid" -o comm=) == "$V6_DIR/v6core" ]]; then
+            kill -KILL "$pid"
+        fi
+    fi
     remove_physical_routes || return 1
     # Closing the owned utun removes all its routes. No global route/PF flush.
     rm -f "$CORE_READY" "$STATE_DIR/core.plist"

@@ -63,11 +63,9 @@ func startCore(fd C.int, config *C.char) *C.char {
 		}
 		return nil
 	})
-	r.Log = func(f core.Flow) { b, _ := json.Marshal(f); fmt.Println("v6core " + string(b)) }
 	t, e := r.StartDevice(strconv.Itoa(copyFD), copyFD)
 	if e != nil {
 		r.Close()
-		unix.Close(copyFD)
 		return C.CString(e.Error())
 	}
 	active = t

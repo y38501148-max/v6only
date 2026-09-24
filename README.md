@@ -1,118 +1,93 @@
-# v6only — 校园网双栈网络配置工具
+# v6only 1.1.0 — 校园网 IPv6 优先转发
 
-本项目保留 `v6only` 名称。**各平台只在识别到校园网时应用设置；手动入口也不能绕过这一条件。离开校园网后撤销本工具配置，普通网络使用原有设置。**
+macOS、Android 和 Windows 使用同一个转发核心。识别域名后，**TCP 先尝试该域名的 IPv6 地址；IPv6 连接全部失败或超时后才尝试 IPv4**，不再由 IPv4 与 IPv6 竞速决定出口。只支持 IPv4 的站点仍可访问。
 
-**当前 macOS 模式允许普通 IPv4 和 IPv6 联网，不能保证双栈网站、代理或所有应用都使用 IPv6。** 使用 IPv6 DNS 上游也不等于只返回 AAAA 记录。地址选择由操作系统、应用、DNS 结果和链路状况共同决定，参见 [RFC 8305](https://www.rfc-editor.org/rfc/rfc8305.html)。
+**仅校园网生效。** 手动模式也必须通过校园识别；离开校园网后恢复普通网络配置。正常家庭网络、热点和蜂窝网络不启用。普通 `10/8` 私网地址不作为校园网证据。
 
-本项目用于网络兼容性诊断和配置研究。请遵守所在网络的使用政策；IPv6 可达性不能证明流量是否计费。
+## 工作方式与边界
 
-## 平台范围
+- 核心读取 A/AAAA，识别 HTTP Host、TLS SNI，建立实际出站连接。TCP 的单个地址族尝试预算为 5 秒，IPv4 不与 IPv6 同时竞速。
+- macOS/Windows 保留真实 DNS 地址和回答，避免现有代理把虚拟地址发送到远端。共享 CDN IP 无法唯一确定域名时，不凭反向缓存猜测目标，优先读取 TLS SNI / HTTP Host。
+- Android 的 VPN DNS 范围内使用虚拟 IPv4 地址映射域名；应用即使选择该 IPv4 地址，核心也会先连接真实 IPv6。出站套接字保护并绑定物理网络，避免返回 VPN。
+- UDP 优先 IPv6；明确连接错误后可回退。QUIC/NTP 可在等不到回应时重试其他地址。普通 UDP 不因没有回应就把同一数据包重发到另一地址，避免重复执行应用操作。
+- 未知 IPv4 QUIC 会触发丢包，常见浏览器会改用可识别域名的 TLS/TCP。自带加密 DNS、ECH、缓存、共享 IP、应用强制绑定物理接口，可能使部分连接无法识别或绕过转发。
+- **远端加密代理内部连接、其他 VPN 和未知裸 IP 不能保证被强制改为 IPv6。** 核心只能控制自身看到并识别的目标；不能从浏览器本地显示的虚拟 IP 或 `127.0.0.1` 判断最终出口。DNS 查询失败或新的 CDN 地址不可达时，桌面端会尝试原目标地址保留连通性，诊断中单独标明该原因。
 
-| 平台 | 当前行为与验证范围 |
-|---|---|
-| macOS | 本次修复和验收的主要平台；Bash 3.2、系统 PF、networksetup、launchd；有模拟系统命令的回归测试 |
-| Windows | 独立 PowerShell 实现；CI 检查部分系统 API，不等于完整实机验收；仅阻断脚本中列出的 IPv4 DNS 地址 |
-| Android | 已合并联网与后台恢复修复；宿主回归及模拟器记录见 `android/TESTING.md`，真实校园/iQOO 环境仍需实机验收 |
+## 故障恢复
 
-## macOS 做了什么
+macOS 为核心添加限定物理接口的出口路由，避免全量路由接管后核心自身失去出口；关闭时仅删除本工具记录的路由。Windows 使用 Wintun，并等待网卡地址可用后再接管路由。桌面 DNS 不指向临时本机 DNS 进程，核心退出后仍可解析。
 
-- Wi-Fi 的 DNS 设置为 `202.112.128.50`、`202.112.128.51`、`2400:3200::1`。校园 DNS 同时返回 A 和 AAAA，放在首选位置能保留内部域名解析并减少公共 IPv6 DNS 超时的影响；公共 IPv6 DNS 作为备用。配置与状态检查使用同一个来源。
-- 为 `gw.buaa.edu.cn` 设置专用校园 DNS resolver，避免公共 DNS 缺少校园内部记录；为该域名添加代理直连例外，保留其余代理设置。
-- 仅在独立 PF anchor `com.apple/v6only` 中过滤外部 IPv4 的 TCP/UDP 53 端口；放行 `10/8` 和 `202.112.128/24` 内的 DNS。它不拦截 DoH、DoT，也不控制代理的出口协议。
-- 守护每 20 秒只读检查配置；配置未变化时不再加载规则、修改 DNS、清缓存或反复联网自检。失败后至少等待 300 秒再重试。
-- 校园识别使用精确的校园 DNS、域名后缀或 SSID；普通 `10/8` 网关不再被直接判定为校园网。
-- 开启前保存原 DNS、网关 resolver 和代理例外的状态；关闭时撤销自身改动，保留后续用户修改和其他 PF 规则。
+核心用真实 TCP 与 UDP/DNS 请求定期检查 TUN 数据通路。启动时允许 30 秒完成路由配置；运行后连续两次检查失败会退出核心/关闭 Android VPN。桌面守护随后撤销自身设置并暂停，需手动开启才重试。桌面首次应用还会检查校园门户和 Bilibili 的完整 DNS/TLS 连通性，失败即回滚，避免反复接管网络。
 
-## macOS 安装与使用
+保留其他代理及防火墙规则，关闭时保留用户后来修改的设置。macOS 守护通常每 20 秒检查校园状态，离校恢复并非切网瞬间同步完成。
 
-```bash
-# 在仓库根目录运行：
-python3 -m unittest discover -s tests -v  # 不需要 root，不修改本机网络
-shellcheck -S warning macos/*.sh
-sudo ./macos/install-launchd.sh
-sudo /usr/local/lib/v6only/test-suite.sh
-```
+## 安装
 
-安装器会先检查文件与语法、建立备份，再部署守护程序。所有被引用的脚本都包含在 `macos/` 中。
+下载 Release 中对应平台的安装包，并核对 `SHA256SUMS.txt`。macOS 包包含 Apple Silicon / Intel 通用核心；Windows 包为 x64；Android APK 支持 arm64-v8a / x86_64，最低 Android 10。
 
-PF 的主规则必须有系统标准入口 `anchor "com.apple/*"`。安装器不会未经检查覆盖主规则：
+### macOS
 
-- **旧版迁移**：如果安装提示缺少入口，且本机运行本项目旧版的三条主规则，使用 `sudo ./macos/install-launchd.sh --migrate-legacy`。它仅接受精确匹配的旧规则，备份原安装后恢复 `/etc/pf.conf` 中的系统规则，再加载独立 anchor。其他自定义主规则会导致迁移停止。
-- **空规则初装**：确认没有现存 PF 过滤和 NAT 规则时，可用 `sudo ./macos/install-launchd.sh --initialize-pf` 初始化系统入口。
-- **其他自定义 PF 配置**：由管理员把独立 anchor 接入现有规则，再安装；不要直接清空主规则。
+解压后，在目录内运行：
 
 ```bash
-sudo /usr/local/lib/v6only/v6on.sh               # 手动开启；重复执行不重复写入
-sudo /usr/local/lib/v6only/v6ctl.sh status       # 只读核对实际设置
-sudo /usr/local/lib/v6only/v6off.sh              # 回滚并暂停自动配置 30 分钟
-sudo /usr/local/lib/v6only/test-suite.sh         # 只读设置检查和少量联网请求
-sudo /usr/local/lib/v6only/test-suite.sh --offline  # 只读，不发联网探测请求
-sudo /usr/local/lib/v6only/uninstall.sh          # 卸载并恢复本工具管理的设置
+sudo bash macos/install-launchd.sh
+sudo bash /usr/local/lib/v6only/v6ctl.sh status
+sudo bash /usr/local/lib/v6only/test-suite.sh
 ```
 
-`v6on.sh` 可以解除手动暂停。离开校园网时的自动回滚不设置暂停，不影响稍后回到校园网。暂停保存为到期时间，不再启动后台 `sleep` 清除标记。
+macOS 二进制为本地签名，未做 Apple 公证。安装器只配置 Wi-Fi/en0；源码构建先运行 `bash macos/build.sh`。PF 必须有系统 `com.apple/*` anchor 入口；已知旧版迁移使用 `--migrate-legacy`，空规则初装使用 `--initialize-pf`，其他自定义主规则需自行保留并接入。
 
-安装器默认配置 `Wi-Fi/en0`。其他服务可先手动测试，例如 `sudo env SERVICE='USB 10/100 LAN' IFACE=en3 ./macos/v6on.sh`；不要在不同服务间切换而不先关闭原配置。
+```bash
+sudo bash /usr/local/lib/v6only/v6off.sh       # 关闭并暂停 30 分钟
+sudo bash /usr/local/lib/v6only/v6on.sh        # 校园内手动开启，也解除故障暂停
+sudo bash /usr/local/lib/v6only/uninstall.sh  # 卸载并恢复本工具拥有的配置
+```
 
-### 状态与恢复
+配置快照在 `/var/db/v6only/original`，安装备份在 `/var/db/v6only/backups`。故障自动暂停使用 `/var/run/v6only.suspend` 空文件；正常手动暂停写入到期时间。若之前明确禁用了 launchd 服务，重新安装会保留该禁用状态，不自行解除。
 
-| 路径 | 内容 |
-|---|---|
-| `/usr/local/lib/v6only/` | 安装的程序 |
-| `/Library/LaunchDaemons/edu.buaa.v6only-watch.plist` | 开机守护 |
-| `/var/db/v6only/original/` | 当前开启前的配置快照 |
-| `/var/db/v6only/backups/install.*` | 每次安装前的版本、规则和设置备份；不会自动删除 |
-| `/var/run/v6only.active` | 已应用标记，状态检查还会核对实际 DNS/PF/resolver |
-| `/var/run/v6only.suspend` | 手动暂停到期时间；空文件代表持续暂停 |
-| `/var/log/v6only.log` | 状态变化与失败记录 |
+### Windows
 
-旧版本没有保存完整的安装前 DNS。迁移时若 DNS 精确匹配旧版本写入的三个地址，关闭后的基线恢复为 DHCP，避免把旧校园配置带到普通网络；迁移时的原始清单仍在安装备份中。其他自定义 DNS 会原样保存。新版本正常开启/关闭不重新加载 PF 主规则、不全局关闭 PF、不清除其他组件的状态表。
+以管理员 PowerShell 在解压目录中运行：
 
-### 验证结果应如何解读
+```powershell
+.\windows\v6only.ps1 -Install
+.\windows\v6only.ps1 -Test
+.\windows\v6only.ps1 -Off
+.\windows\v6only.ps1 -On
+.\windows\v6only.ps1 -Uninstall
+```
 
-`test-suite.sh` 分别检查 IPv4、IPv6 和校园网关的连通性，并输出实际远端地址。网站返回 HTTP 错误也可能说明网络已连接；业务登录是否正常需要另行验证。代理存在时，浏览器最终使用哪个出口需要检查代理连接，不能从本地 `127.0.0.1:7890` 推断。
+发布包包含核心及 [Wintun 官方签名 DLL](https://www.wintun.net/)，构建脚本固定版本并校验 SHA-256。配置和快照位于 `%ProgramData%\v6only`。
 
-测试不会注销校园账号、清理系统缓存或修改代理开关。PF 读回需要 root；普通用户运行会明确跳过这一项。
+### Android
 
-## Windows
+安装 APK，启动服务并授权 VPN。自动模式在非校园网只监听，不建立 VPN；手动模式离校后停止。校园识别使用物理网络 DNS、域名或校园 Wi-Fi 名称，名称识别可选位置权限，应用不读取坐标。停止服务后不会因网络变化自行开启。
 
-Windows 入口为 `windows/v6only.ps1`，提供 `-On/-Off/-Watch/-Test/-Install/-Uninstall` 接口。
+新 Release 使用与 1.0.1—1.0.3 相同的签名，可覆盖升级。自行构建的调试包通常不能覆盖 Release。iQOO/vivo 等设备仍可能需要允许自启动、后台运行；强行停止后需手动打开。普通模式不支持“阻止未通过 VPN 的连接”，离校时需要系统正常联网。
 
-## Android 使用
+## 验证和开发隔离
 
-1. 安装 `v6only.apk`（本地构建：`cd android && ./build-apk.sh`），打开应用并点击「启动服务」授予 VPN 权限。
-2. 默认自动模式：校园 DNS（`202.112.128.50/51`）、`buaa.edu.cn` 搜索域或 BUAA Wi-Fi 名称匹配时连接；离开校园网后断开 VPN，**前台服务继续监听**。普通 `10.x` 私网、蜂窝网络、VPN 自身不再作为校园网证据。
-3. 若网络未提供校园 DNS／域名，可通过「授权校园 Wi-Fi 名称识别」授予精确位置权限并打开系统定位；后台识别新接入的 Wi-Fi 还需在系统位置权限中选择「始终允许」。应用只读取 Wi-Fi 名称，不读取坐标。SSID 不可读取且 DNS／域名也不匹配时，保持原网络，不建立 VPN；手动模式同样遵守校园限制。
-4. 手动模式也仅允许在校园网连接，离开校园网后停止服务，回校需再次手动启动；点击「停止服务」同时停止 VPN 和自动监听，不会因网络变化自行重启。下次启动恢复保存的模式。
-5. 划掉最近任务不停止前台服务。已启用的服务会在系统回收后尝试恢复，并在重启／应用更新后恢复；从未启用或明确停止的服务不会自动开启。
-6. **iQOO／vivo**：在系统设置中允许应用自启动和后台运行（部分版本称为「后台高耗电」），将电池策略改为不限制，并在最近任务中锁定应用。应用内提供电池和应用设置入口。厂商强制清理、系统「强行停止」无法由应用保证恢复；强行停止后需手动打开应用。
+**不要在日常使用的宿主机上试验默认路由、DNS 或防火墙接管。** 普通本地检查：
 
-Android 1.0.3 校园边界修复：
+```bash
+(cd core && go test -race ./... && go vet ./...)
+python3 -m unittest discover -s tests -v
+bash android/test.sh
+```
 
-- 自动和手动模式都只在校园网建立 VPN，普通网络不应用校园配置。
-- 手动离校后停止服务；自动离校后保持监听，回校自动连接。
-- 服务关闭后保留非校园网／撤销授权原因，避免状态提示被覆盖。
+系统测试：
 
-Android 1.0.2 界面更新：
+- `tests/tunnel-linux.sh`：隔离网络命名空间，真实 TUN、DNS/TCP、UDP、TLS SNI、IPv6 优先、IPv4-only、IPv6 失败回退、退出恢复。拒绝普通宿主环境。
+- `tests/tunnel-macos.sh`：仅 GitHub 托管 macOS 虚拟机运行，先测受控双栈，再测全量路由下的公网 HTTPS，关闭后检查恢复。
+- `windows/integration-test.ps1`：仅 GitHub 托管 Windows 虚拟机运行，实际加载 Wintun，验证双栈、全量转发和退出恢复；不代表 Windows 校园实机验收。
+- `ANDROID_SERIAL=emulator-5580 V6ONLY_TEST_SUITE=tunnel bash android/device-test.sh`：仅临时模拟器，使用生产版 TUN 建立、关闭与套接字保护代码。测试服务仅存在于 `v6only-fixture.apk`，生产 APK 不包含校园识别绕过入口。详见 [Android 测试说明](android/TESTING.md)。
 
-- 状态首页直接区分未启动、已连接、等待校园网和网络等待，启动／停止操作带有即时反馈。
-- 自动／手动改为明确的分段选择，连接状态与后台监听分别显示。
-- 校园网识别、后台运行、服务通知集中展示授权状态；iQOO/vivo 设置说明按需展开。
-- 跟随系统浅色／深色主题，支持大字体、小屏和横屏滚动布局，主要操作触控区域至少 48dp。
-- 与 `android-v1.0.1` 使用相同签名，可直接覆盖升级并保留设置；从最初 `v1.0.0` 升级仍需处理签名差异。
+校园物理网络、厂商后台限制和其他代理组合仍需各自环境验收。CI / 模拟器结果不等同于这些实机环境全部通过。
 
-Android 1.0.1 修复说明：
+## 诊断和许可证
 
-- 移除 `0.0.0.0/0` 全量捕获、丢弃 IPv4、TUN 原样回写和没有转发器的虚假 DNS。
-- 使用当前物理网络下发的真实 DNS，优先列出有路由的 IPv6 DNS，保留 IPv4 DNS；不篡改 A／AAAA 回答，保留校内域名解析。
-- 显式 `allowFamily(AF_INET)` 与 `allowFamily(AF_INET6)`；不添加默认路由，DNS、TCP、UDP、IPv4 和 IPv6 由 Android 原生网络栈处理。仅不添加 IPv6 路由并不会自动放行 IPv6。
-- 这不是加密隧道或全流量防火墙，也不强制浏览器使用 IPv6。网站最终走 IPv4 还是 IPv6 取决于可达性、系统与浏览器的地址选择；浏览器自带 DoH／系统私人 DNS 保持其各自行为。
-- 自动模式由前台服务持有网络回调，支持断网等待、链路属性变化和恢复；VPN 成功建立后才显示已连接，停止时实际关闭文件描述符。
-- 此分流模式不支持「阻止未通过 VPN 的连接」；已声明不支持系统始终开启 VPN，避免该选项导致直连流量被阻断。
+桌面运行时 `http://127.0.0.1:17890/flows?host=www.bilibili.com` 返回最近的内存连接记录，包括真实远端地址、TCP/UDP 地址族与回退原因。默认不将每个访问域名写入日志；`--log-flows` 可显式启用。只读状态接口绑定本机回环地址。
 
-构建默认使用本地调试证书。**调试包不能覆盖不同证书签名的旧 Release**，需使用原发布密钥重新签名，或卸载旧包后安装（会清除旧设置）。正式签名可设置 `V6ONLY_KEYSTORE`、`V6ONLY_KEY_ALIAS`、`V6ONLY_STORE_PASSWORD`、`V6ONLY_KEY_PASSWORD` 环境变量后运行构建脚本；不要提交密钥或密码。SDK 通过 `ANDROID_HOME` 定位，也可覆盖 `ANDROID_BUILD_TOOLS` 和 `ANDROID_PLATFORM_JAR`。
+发布包携带依赖许可证；Android 内置于 APK 的 `assets/third-party`。项目采用 MIT License，第三方组件各自遵循其许可证。IPv6 可达性不代表校园流量计费规则。
 
-
-## CI
-
-`.github/workflows/ci.yml` 包含 macOS ShellCheck、Bash 3.2 回归测试、PF 只解析检查，以及现有 Windows API 冒烟与 Android 构建任务。回归测试在临时目录模拟系统命令，覆盖幂等检查、失败回滚、用户设置保留、校园识别、暂停与重入，不操作 runner 的真实网络。
+[1.0.3 历史说明](docs/1.0.3.md)

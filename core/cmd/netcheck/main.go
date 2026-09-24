@@ -2,10 +2,12 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
 	"github.com/miekg/dns"
+	core "github.com/y38501148-max/v6only/core"
 	"io"
 	"net"
 	"net/http"
@@ -18,6 +20,8 @@ func main() {
 	raw := flag.String("raw", "203.0.113.3", "IPv4 fixture for uncached TLS SNI")
 	skipSNI := flag.Bool("skip-sni", false, "fixture IP is local to the runner and bypasses its TUN")
 	flag.Parse()
+	must(core.CheckDataPlane(context.Background()))
+	fmt.Println("PASS real TCP and DNS data-plane health probes")
 	resolve := func(host, proto string) string {
 		q := new(dns.Msg)
 		q.SetQuestion(host+".", dns.TypeA)

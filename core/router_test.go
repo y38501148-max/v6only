@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -32,6 +33,39 @@ func fixture(t *testing.T, hosts Result) (*Router, *[]string) {
 	}
 	t.Cleanup(r.Close)
 	return r, &calls
+}
+
+func TestUnansweredUDPIsNotReplayedAtAnotherDestination(t *testing.T) {
+	l, e := net.ListenPacket("udp6", "[::1]:0")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer l.Close()
+	_, port, _ := net.SplitHostPort(l.LocalAddr().String())
+	r := New(Config{FamilyTimeoutMS: 100}, nil)
+	defer r.Close()
+	r.LookupOverride = func(context.Context, string) (Result, error) { return dual(), nil }
+	var ipv4 atomic.Int32
+	r.DialOverride = func(ctx context.Context, n, a string) (net.Conn, error) {
+		if n == "udp4" {
+			ipv4.Add(1)
+		}
+		return (&net.Dialer{}).DialContext(ctx, n, a)
+	}
+	c, reply, e := r.OpenUDP(context.Background(), "oneway.test", port, []byte("single delivery"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer c.Close()
+	if len(reply) != 0 || ipv4.Load() != 0 {
+		t.Fatal("unanswered datagram replayed", reply, ipv4.Load())
+	}
+	l.SetReadDeadline(time.Now().Add(time.Second))
+	b := make([]byte, 100)
+	n, _, e := l.ReadFrom(b)
+	if e != nil || string(b[:n]) != "single delivery" {
+		t.Fatal("IPv6 delivery failed", e)
+	}
 }
 func dual() Result {
 	return Result{V6: []net.IP{net.ParseIP("::1")}, V4: []net.IP{net.ParseIP("127.0.0.1")}, TTL: time.Minute}

@@ -15,6 +15,7 @@ watch_once() {
         # the same network. Manual on can resume after the fault is investigated.
         if [[ -f "$MARKER" ]] && ! core_active; then
             /bin/bash "$V6_DIR/v6ctl.sh" off >> "$LOG" 2>&1 || return 1
+            : > "$SUSPEND"
             log 'forwarding core lost → restored system network and paused'
             return 0
         fi

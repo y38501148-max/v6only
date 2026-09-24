@@ -118,6 +118,13 @@ jobs:
           } else {
             Write-Host "⚠ CI 无启用 IPv6 DNS 的活动网卡，跳过 IPv6 DNS API 冒烟（其余测试继续）"
           }
+      - name: Package Windows x64 distribution
+        shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v6only-windows
+          path: build/release/*.zip
 
   macos-shellcheck:
     runs-on: ubuntu-latest
@@ -146,6 +153,12 @@ jobs:
         run: sudo pfctl -n -a com.apple/v6only -f macos/anchor-v6only
       - name: Disposable VM actual utun, dual-stack and exit recovery
         run: sudo -E env "PATH=$PATH" bash tests/tunnel-macos.sh
+      - name: Package macOS universal distribution
+        run: bash scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v6only-macos
+          path: build/release/*.zip
 
   android-build:
     runs-on: macos-latest
@@ -161,6 +174,11 @@ jobs:
           bash android/build-apk.sh
       - name: Campus detection and mode regression tests
         run: bash android/test.sh
+      - name: Release APK must not contain test-only VPN service
+        run: |
+          source android/sdk-env.sh
+          "$BT/aapt2" dump xmltree android/v6only.apk --file AndroidManifest.xml > /tmp/manifest.txt
+          if grep -q FixtureVpn /tmp/manifest.txt; then exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
           name: v6only-apk

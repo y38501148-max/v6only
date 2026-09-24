@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '../core')
 try {
-    go build -trimpath -ldflags='-s -w' -o (Join-Path $PSScriptRoot 'v6core.exe') ./cmd/v6core
+    $version=(Get-Content "$PSScriptRoot/../VERSION" -Raw).Trim()
+    go build -trimpath "-ldflags=-s -w -X main.version=$version" -o (Join-Path $PSScriptRoot 'v6core.exe') ./cmd/v6core
     if ($LASTEXITCODE -ne 0) { throw 'Go build failed' }
 } finally { Pop-Location }
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('v6only-wintun-' + [guid]::NewGuid())

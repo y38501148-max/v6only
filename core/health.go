@@ -14,6 +14,8 @@ const healthAddress = "198.18.0.2"
 const healthPort = 17891
 const healthReply = "v6only-tun-ok\n"
 
+func (r *Router) HealthVerified() bool { return r.healthy.Load() }
+
 // CheckDataPlane deliberately uses ordinary, unprotected sockets. Both probes
 // must traverse the OS routes, TUN device, userspace stack and return path.
 func CheckDataPlane(ctx context.Context) error {
@@ -65,6 +67,7 @@ func (r *Router) WatchDataPlane() <-chan error {
 				return
 			case <-timer.C:
 				e := CheckDataPlane(r.ctx)
+				r.healthy.Store(e == nil)
 				if e == nil {
 					healthy = true
 					failures = 0

@@ -22,6 +22,9 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+var version = "dev"
+
 func run() error {
 	iface := flag.String("interface", "", "physical outbound interface (required for TUN)")
 	dns := flag.String("dns", "202.112.128.50,202.112.128.51", "physical DNS IPs, comma-separated")
@@ -32,7 +35,13 @@ func run() error {
 	ready := flag.String("ready", "", "ready JSON file")
 	probe := flag.String("probe", "", "probe an HTTP(S) URL and print actual connections")
 	fakeDNS := flag.Bool("fake-dns", false, "synthetic addresses for an isolated VPN DNS scope (never system-wide desktop DNS)")
+	logFlows := flag.Bool("log-flows", false, "log connection destinations to stdout (off by default)")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return nil
+	}
 	cfg := core.Config{DNS: strings.Split(*dns, ","), Interface: *iface, FakeDNS: *fakeDNS}
 	r := core.New(cfg, nil)
 	defer r.Close()
@@ -66,7 +75,9 @@ func run() error {
 	if *dev != "" && *iface == "" {
 		return fmt.Errorf("TUN requires a physical --interface to prevent routing loops")
 	}
-	r.Log = func(f core.Flow) { json.NewEncoder(os.Stdout).Encode(f) }
+	if *logFlows {
+		r.Log = func(f core.Flow) { json.NewEncoder(os.Stdout).Encode(f) }
+	}
 	var tunnel *core.Tunnel
 	var e error
 	if *dev != "" {
@@ -108,7 +119,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ready":true,"policy":"ipv6-before-ipv4"}`)
+		fmt.Fprintf(w, `{"ready":true,"policy":"ipv6-before-ipv4","data_path_verified":%t}`, r.HealthVerified())
 	})
 	mux.HandleFunc("/flows", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -54,11 +54,13 @@ find "$OUT/obj" -name '*.class' > "$OUT/classes.txt"
   @"$OUT/classes.txt"
 
 bash "$PROJ/build-native.sh"
+python3 "$PROJ/../scripts/collect-licenses.py" "$OUT/apk/assets/third-party"
+cp "$PROJ/../LICENSE" "$OUT/apk/assets/LICENSE"
 
 echo "[4/6] 打入 classes.dex"
 cd "$OUT/apk"
 zip -qj base.apk classes.dex
-zip -qr base.apk lib
+zip -qr base.apk lib assets
 
 echo "[5/6] zipalign"
 "$BT/zipalign" -f 4 base.apk aligned.apk

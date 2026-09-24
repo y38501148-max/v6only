@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -55,6 +56,7 @@ type Router struct {
 	next           uint32
 	flows          []Flow
 	connections    map[net.Conn]bool
+	healthy        atomic.Bool
 	Log            func(Flow)
 	LookupOverride func(context.Context, string) (Result, error)
 	DialOverride   func(context.Context, string, string) (net.Conn, error)

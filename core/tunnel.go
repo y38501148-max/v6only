@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -29,6 +30,9 @@ func (r *Router) StartDevice(name string, fd int) (*Tunnel, error) {
 	var e error
 	if fd >= 0 {
 		d, e = fdbased.Open(strconv.Itoa(fd), 1500, 0)
+		if e != nil {
+			os.NewFile(uintptr(fd), "tun").Close()
+		}
 	} else {
 		d, e = tun.Open(name, 1500)
 	}
@@ -84,6 +88,21 @@ func (r *Router) tcp(c adapter.TCPConn) {
 		host = ip.String()
 	}
 	remote, e := r.Dial(r.ctx, host, strconv.Itoa(int(port)))
+	if e != nil && host != ip.String() && !isFake(ip) && r.ctx.Err() == nil {
+		// A DNS outage or a different CDN answer must not make an otherwise
+		// reachable, real destination unusable. IPv6 candidates were attempted
+		// first whenever resolution succeeded. Never send a synthetic IP out.
+		network := "tcp6"
+		if ip.To4() != nil {
+			network = "tcp4"
+		}
+		ctx, cancel := context.WithTimeout(r.ctx, time.Duration(r.cfg.FamilyTimeoutMS)*time.Millisecond)
+		remote, e = r.rawDial(ctx, network, net.JoinHostPort(ip.String(), strconv.Itoa(int(port))))
+		cancel()
+		if e == nil {
+			r.record(host, remote, network, "original_destination_after_lookup_or_connect_failure")
+		}
+	}
 	if e != nil {
 		log.Printf("TCP forwarding failed: %v", e)
 		return
@@ -160,8 +179,10 @@ func (r *Router) udp(c adapter.UDPConn) {
 		return
 	}
 	defer r.untrack(remote)
-	if _, e = c.Write(response); e != nil {
-		return
+	if len(response) > 0 {
+		if _, e = c.Write(response); e != nil {
+			return
+		}
 	}
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -223,6 +244,15 @@ func (r *Router) OpenUDP(ctx context.Context, host, port string, first []byte) (
 						c.SetDeadline(time.Time{})
 						r.record(host, c, network, reason)
 						return c, buf[:n], nil
+					}
+					// An unanswered arbitrary UDP datagram may already have been
+					// processed. Do not replay it at another IP/family. QUIC and NTP
+					// have protocol-level duplicate handling and explicit responses.
+					if timeout, ok := e.(net.Error); ok && timeout.Timeout() && port != "443" && port != "123" && ctx.Err() == nil {
+						cancel()
+						c.SetDeadline(time.Time{})
+						r.record(host, c, network, "udp_response_pending")
+						return c, nil, nil
 					}
 				}
 				c.Close()

@@ -104,7 +104,13 @@ apply_failed() {
     trap - ERR
     set +e
     printf '配置失败，正在撤销本次管理的网络设置。\n' >&2
-    restore || printf '部分回滚失败，快照保留于 %s。\n' "$STATE_DIR" >&2
+    if restore; then
+        # A failed activation requires an explicit retry, never repeated network
+        # takeover in the background on the same broken configuration.
+        : > "$SUSPEND"
+    else
+        printf '部分回滚失败，快照保留于 %s。\n' "$STATE_DIR" >&2
+    fi
     exit "$status"
 }
 

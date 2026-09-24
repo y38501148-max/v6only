@@ -113,27 +113,9 @@ public class V6VpnService extends VpnService {
             return;
         }
         try {
-            // Tear down the old stack before replacing its TUN or physical network.
-            closeTun();
-            coreNetwork = state.network;
-            Builder builder = new Builder().setSession("v6only · IPv6 优先转发")
-                    .setMtu(1500)
-                    .addAddress("198.18.0.1", 15)
-                    .addAddress("fd00:198:18::1", 64)
-                    .addRoute("0.0.0.0", 0)
-                    .addRoute("::", 0)
-                    .addDnsServer("198.18.0.2")
-                    .setMetered(metered)
-                    .setUnderlyingNetworks(new Network[]{state.network})
-                    .setConfigureIntent(openActivity());
-            ParcelFileDescriptor next = builder.establish();
-            if (next == null) throw new IOException("VPN authorization was revoked");
-            tun = next;
-            org.json.JSONArray servers = new org.json.JSONArray();
-            for (InetAddress address : dns) servers.put(address.getHostAddress());
-            org.json.JSONObject config = new org.json.JSONObject().put("dns", servers).put("fake_dns", true).put("generation",coreGeneration);
-            String error = CoreNative.start(next.getFd(), config.toString(), this);
-            if (!error.isEmpty()) throw new IOException(error);
+            List<String> servers = new ArrayList<>();
+            for (InetAddress address : dns) servers.add(address.getHostAddress());
+            establishTunnel(state.network, servers, metered);
             configuration = key;
             V6VpnServiceExt.setRunning(true);
             Log.i("V6VpnService", "IPv6 forwarding VPN established on " + state.network + ", DNS=" + dns);
@@ -145,6 +127,31 @@ public class V6VpnService extends VpnService {
             publish("连接失败，已恢复系统网络；稍后重试");
             handler.postDelayed(retry, 5000);
         }
+    }
+
+    // Shared by the production controller and the test-only emulator service.
+    protected final void establishTunnel(Network network, List<String> dns, boolean metered) throws Exception {
+            // Tear down the old stack before replacing its TUN or physical network.
+            closeTun();
+            coreNetwork = network;
+            Builder builder = new Builder().setSession("v6only · IPv6 优先转发")
+                    .setMtu(1500)
+                    .addAddress("198.18.0.1", 15)
+                    .addAddress("fd00:198:18::1", 64)
+                    .addRoute("0.0.0.0", 0)
+                    .addRoute("::", 0)
+                    .addDnsServer("198.18.0.2")
+                    .setMetered(metered)
+                    .setUnderlyingNetworks(new Network[]{network})
+                    .setConfigureIntent(openActivity());
+            ParcelFileDescriptor next = builder.establish();
+            if (next == null) throw new IOException("VPN authorization was revoked");
+            tun = next;
+            org.json.JSONArray servers = new org.json.JSONArray();
+            for (String address : dns) servers.put(address);
+            org.json.JSONObject config = new org.json.JSONObject().put("dns", servers).put("fake_dns", true).put("generation",coreGeneration);
+            String error = CoreNative.start(next.getFd(), config.toString(), this);
+            if (!error.isEmpty()) throw new IOException(error);
     }
 
     private PendingIntent openActivity() {
@@ -182,7 +189,7 @@ public class V6VpnService extends VpnService {
         } catch (IOException error) { return false; }
     }
 
-    private void closeTun() {
+    protected final void closeTun() {
         coreGeneration++;
         if (tun != null) {
             try { tun.close(); } catch (IOException error) { Log.w("V6VpnService", "Close TUN", error); }

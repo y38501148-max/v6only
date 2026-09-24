@@ -167,6 +167,20 @@ function Get-AdapterDns($Adapter) {
         Where-Object { $_ } | Select-Object -Unique)
 }
 
+function Test-Forwarding {
+    foreach ($url in @('https://gw.buaa.edu.cn/','https://www.bilibili.com/')) {
+        $request = [System.Net.HttpWebRequest]::Create($url)
+        $request.Proxy = $null
+        $request.Method = 'HEAD'
+        $request.Timeout = 15000
+        try { $response = $request.GetResponse(); $response.Close() }
+        catch [System.Net.WebException] {
+            if ($_.Exception.Response) { $_.Exception.Response.Close() }
+            else { throw }
+        }
+    }
+}
+
 function Invoke-V6On {
     $adapter = Get-ActiveAdapter
     $campus, $why = Test-CampusNetwork $adapter
@@ -220,10 +234,12 @@ function Invoke-V6On {
         }
         if ((@(Get-AdapterDns $adapter) -join ',') -ne ($ManagedDns -join ',')) { throw 'DNS readback mismatch' }
         New-Item -ItemType File -Force -Path $Marker | Out-Null
+        Test-Forwarding
         Remove-Item $SuspendFlg -Force -ErrorAction SilentlyContinue
         Write-Log "campus configuration applied ($why)"
     } catch {
         Invoke-V6Off -Automatic
+        '' | Set-Content $SuspendFlg -Encoding UTF8
         throw
     }
     if (-not $Watch) { Write-Host '已应用 IPv6 优先转发；IPv6 全部失败后才回退 IPv4。' }
@@ -370,6 +386,7 @@ switch ($true) {
                 } elseif ($campus -and -not (Test-Suspended $SuspendFlg)) {
                     if ((Test-Path $Marker) -and -not (Test-CoreActive)) {
                         Invoke-V6Off
+                        '' | Set-Content $SuspendFlg -Encoding UTF8
                         Write-Log 'Forwarding core lost; restored system network and paused'
                     } else { Invoke-V6On }
                 }
