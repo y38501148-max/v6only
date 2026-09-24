@@ -27,6 +27,7 @@ final class CampusPolicy {
 
     static boolean shouldConnect(boolean enabled, boolean automatic,
                                  boolean campus, boolean networkAvailable) {
-        return enabled && networkAvailable && (!automatic || campus);
+        // Manual mode must not apply campus DNS/VPN policy on ordinary networks.
+        return enabled && networkAvailable && campus;
     }
 }

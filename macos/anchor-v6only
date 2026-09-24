@@ -1,0 +1,6 @@
+# Load only into com.apple/v6only; never replace the system's main ruleset.
+v6only_if = "en0"
+table <v6only_campus_dns> const { 10.0.0.0/8, 202.112.128.0/24 }
+block drop out quick on $v6only_if inet proto udp from any to ! <v6only_campus_dns> port 53 label "v6only-dns-udp"
+block drop out quick on $v6only_if inet proto tcp from any to ! <v6only_campus_dns> port 53 label "v6only-dns-tcp"
+# No blanket pass/skip rules: preserve other components' IPv4/IPv6 policy.

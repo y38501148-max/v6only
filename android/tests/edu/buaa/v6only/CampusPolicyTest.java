@@ -25,8 +25,7 @@ public final class CampusPolicyTest {
                     for (boolean network : new boolean[]{false, true}) {
                         boolean actual = CampusPolicy.shouldConnect(enabled, automatic, campus, network);
                         if (!enabled || !network) check(!actual);
-                        else if (automatic) check(actual == campus);
-                        else check(actual);
+                        else check(actual == campus);
                     }
                 }
             }

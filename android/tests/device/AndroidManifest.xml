@@ -3,4 +3,5 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <application android:label="v6only regression tests"/>
     <instrumentation android:name=".NetworkSmoke" android:targetPackage="edu.buaa.v6only"/>
+    <instrumentation android:name=".UiSmoke" android:targetPackage="edu.buaa.v6only"/>
 </manifest>

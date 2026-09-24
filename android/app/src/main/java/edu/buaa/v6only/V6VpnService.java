@@ -35,6 +35,7 @@ public class V6VpnService extends VpnService {
     private ParcelFileDescriptor tun;
     private String configuration = "";
     private boolean destroyed;
+    private boolean stopping;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -79,6 +80,12 @@ public class V6VpnService extends VpnService {
         boolean automatic = prefs.getBoolean("auto", true);
         if (!CampusPolicy.shouldConnect(true, automatic, state.isCampus(), state.network != null)) {
             closeTun();
+            if (!automatic && state.network != null && !state.isCampus()) {
+                prefs.edit().putBoolean("enabled", false).commit();
+                stopEverything();
+                publish("当前非校园网，手动服务已停止");
+                return;
+            }
             publish(state.network == null ? "等待网络连接" : "自动模式：等待接入校园网");
             return;
         }
@@ -175,6 +182,7 @@ public class V6VpnService extends VpnService {
     }
 
     private void stopEverything() {
+        stopping = true;
         handler.removeCallbacks(retry);
         watcher.stop();
         closeTun();
@@ -206,7 +214,8 @@ public class V6VpnService extends VpnService {
         watcher.stop();
         closeTun();
         V6VpnServiceExt.setMonitoring(false);
-        publish("服务已停止");
+        // Keep the reason for an explicit shutdown visible after service destruction.
+        publish(stopping ? V6VpnServiceExt.message() : "服务已停止");
         super.onDestroy();
     }
 }

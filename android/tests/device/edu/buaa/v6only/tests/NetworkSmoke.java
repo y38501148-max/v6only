@@ -48,6 +48,27 @@ public final class NetworkSmoke extends Instrumentation {
             activity = startActivitySync(new Intent(context, MainActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             command(V6VpnService.ACTION_START);
+            await(() -> V6VpnServiceExt.running(context)
+                    || V6VpnServiceExt.message().contains("当前非校园网"), "campus gate evaluated");
+            if (!V6VpnServiceExt.campus()) {
+                check(!V6VpnServiceExt.running(context), "manual mode must not connect off campus");
+                check(!prefs.getBoolean("enabled", true), "manual off-campus request stops service");
+                prefs.edit().putBoolean("auto", true).commit();
+                command(V6VpnService.ACTION_START);
+                await(() -> V6VpnServiceExt.monitoring(), "automatic off-campus monitoring");
+                SystemClock.sleep(1000);
+                check(!V6VpnServiceExt.running(context), "automatic mode must not create off-campus VPN");
+                runOnMainSync(() -> activity.finishAndRemoveTask());
+                SystemClock.sleep(1000);
+                check(V6VpnServiceExt.monitoring() && !V6VpnServiceExt.running(context), "standby survives Recents removal");
+                command(V6VpnService.ACTION_STOP);
+                await(() -> !V6VpnServiceExt.monitoring(), "explicit stop of standby");
+                result.putString("stream", "\nPASS: campus boundary and off-campus lifecycle checks\n"
+                        + "SKIP: tunnel routing checks require a recognized campus fixture\n"
+                        + "PASS: all Android device regression checks\n");
+                finish(Activity.RESULT_OK, result);
+                return;
+            }
             await(() -> V6VpnServiceExt.running(context), "manual VPN establishment");
             await(() -> cm.getActiveNetwork() != null && cm.getNetworkCapabilities(cm.getActiveNetwork())
                     .hasTransport(NetworkCapabilities.TRANSPORT_VPN), "VPN becomes default for test UID");
@@ -87,10 +108,10 @@ public final class NetworkSmoke extends Instrumentation {
 
             prefs.edit().putBoolean("auto", true).commit();
             command(V6VpnService.ACTION_APPLY);
-            await(() -> !V6VpnServiceExt.running(context), "auto stops tunnel off campus");
+            await(() -> V6VpnServiceExt.running(context), "auto retains campus tunnel");
             check(V6VpnServiceExt.monitoring(), "auto must retain foreground watcher");
-            check(!V6VpnServiceExt.campus(), "emulator 10/8 must not match campus");
-            pass("auto mode rejects non-campus 10/8 and keeps foreground monitoring");
+            check(V6VpnServiceExt.campus(), "tunnel requires a campus fixture");
+            pass("auto mode retains campus-only connection");
             prefs.edit().putBoolean("auto", false).commit();
             command(V6VpnService.ACTION_APPLY);
             await(() -> V6VpnServiceExt.running(context), "switch back to manual");
