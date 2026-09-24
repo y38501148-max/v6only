@@ -151,6 +151,8 @@ jobs:
           python3 -m unittest discover -s tests -v
       - name: PF 规则解析（仅检查，不加载）
         run: sudo pfctl -n -a com.apple/v6only -f macos/anchor-v6only
+      - name: Build integration tools without root-owned module caches
+        run: cd core && go build -o build/integration/ ./cmd/v6core ./cmd/netfixture ./cmd/netcheck
       - name: Disposable VM actual utun, dual-stack and exit recovery
         run: sudo -E env "PATH=$PATH" bash tests/tunnel-macos.sh
       - name: Package macOS universal distribution

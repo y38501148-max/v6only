@@ -30,7 +30,9 @@ cleanup() {
     ifconfig lo0 inet6 2001:db8:1::3 -alias 2>/dev/null || true
 }
 trap cleanup EXIT
-for cmd in v6core netfixture netcheck; do (cd "$PROJ/core" && go build -o "$BIN/$cmd" "./cmd/$cmd"); done
+for cmd in v6core netfixture netcheck; do
+    [[ -x "$BIN/$cmd" ]] || { echo "Build core/build/integration/$cmd as the unprivileged runner user first." >&2; exit 1; }
+done
 ifconfig lo0 inet 203.0.113.3 255.255.255.255 alias
 ifconfig lo0 inet6 2001:db8:1::3 prefixlen 128 alias
 "$BIN/netfixture" --listen4 203.0.113.3 --listen6 2001:db8:1::3 > "$BIN/fixture.log" 2>&1 &

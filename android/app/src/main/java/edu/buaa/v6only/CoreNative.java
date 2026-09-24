@@ -1,5 +1,5 @@
 package edu.buaa.v6only;
-/** Shared, audited gVisor packet stack and strict IPv6 dialer. */
+/** Shared gVisor packet stack and IPv6-first dialer. */
 public final class CoreNative {
     static { System.loadLibrary("v6core"); }
     private CoreNative() {}
