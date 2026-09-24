@@ -38,5 +38,14 @@ find "$OUT/obj" -name '*.class' > "$OUT/classes.txt"
 "${ADB[@]}" install --no-incremental -r "$OUT/tests.apk"
 "${ADB[@]}" shell appops set edu.buaa.v6only ACTIVATE_VPN allow
 "${ADB[@]}" shell pm grant edu.buaa.v6only android.permission.POST_NOTIFICATIONS || true
-"${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.NetworkSmoke | tee "$OUT/result.txt"
-grep -q 'PASS: all Android device regression checks' "$OUT/result.txt"
+case "${V6ONLY_TEST_SUITE:-network}" in
+  network|ui|all) ;;
+  *) echo 'V6ONLY_TEST_SUITE must be network, ui or all.' >&2; exit 1 ;;
+esac
+if [[ "${V6ONLY_TEST_SUITE:-network}" != ui ]]; then
+  "${ADB[@]}" shell am instrument -w edu.buaa.v6only.tests/.NetworkSmoke | tee "$OUT/result.txt"
+  grep -q 'PASS: all Android device regression checks' "$OUT/result.txt"
+fi
+if [[ "${V6ONLY_TEST_SUITE:-network}" != network ]]; then
+  "$PROJ/ui-test.sh"
+fi

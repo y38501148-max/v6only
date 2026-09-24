@@ -1,0 +1,6 @@
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#20155EBC">
+    <item><selector>
+        <item android:state_checked="true" android:drawable="@drawable/bg_selected"/>
+        <item android:drawable="@android:color/transparent"/>
+    </selector></item>
+</ripple>

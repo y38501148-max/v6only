@@ -35,6 +35,17 @@ Verified on the API 36 arm64 Google APIs emulator:
 
 `device-test.sh` writes the full result to `android/build/device-tests/result.txt`. A failed assertion or missing final success marker fails the script. The emulator's built-in DNS proxy does not provide reliable TCP DNS service; a separate controlled DNS/TCP fixture avoids mistaking that emulator limitation for an app regression.
 
+## UI interaction and visual checks
+
+```sh
+# Build and install both packages, then run network checks plus the UI checks.
+ANDROID_SERIAL=emulator-5580 V6ONLY_TEST_SUITE=all bash android/device-test.sh
+# Or rerun UI checks against the already installed matching packages:
+ANDROID_SERIAL=emulator-5580 bash android/ui-test.sh
+```
+
+`V6ONLY_TEST_SUITE=ui` builds and runs only UI checks. The UI suite drives actual native views: mode choice while stopped, start, connected feedback, automatic standby, stop and help expansion/restoration across Activity recreation. It validates touch targets of at least 48dp and text/layout bounds in light, dark, compact 320dp width at font scale 1.5, and landscape configurations. Emulator display/font/night settings are reset after the suite. Captured PNGs are saved in `android/build/ui-tests/ui-checks/` for visual inspection, including connected and waiting states. They are actual emulator screenshots.
+
 ## Device lifecycle recovery
 
 After `device-test.sh`, on the same disposable, rootable emulator:

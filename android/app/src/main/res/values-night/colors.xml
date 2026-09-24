@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="page">#0C1421</color>
+    <color name="surface">#152236</color>
+    <color name="ink">#ECF2FA</color>
+    <color name="muted">#A9BAD0</color>
+    <color name="line">#2A3B50</color>
+    <color name="soft">#1E3046</color>
+    <color name="accent">#A6CFFF</color>
+    <color name="accent_soft">#213F62</color>
+    <color name="hero_start">#172D4A</color>
+    <color name="hero_end">#23496A</color>
+    <color name="hero_muted">#D0DFED</color>
+    <color name="hero_badge">#345372</color>
+</resources>
