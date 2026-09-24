@@ -9,6 +9,8 @@ PROJ=$(cd "$(dirname "$0")/.." && pwd)
 BIN="$PROJ/core/build/integration"
 mkdir -p "$BIN"
 CORE_PID=''; FIXTURE_PID=''
+# Shared with the sourced runtime route helpers.
+# shellcheck disable=SC2034
 STATE_DIR="$BIN/runtime"
 # Use the same physical bypass route implementation as the released controller.
 source "$PROJ/macos/v6-runtime.sh"
@@ -59,6 +61,7 @@ UPSTREAM=$(scutil --dns | awk '/nameserver\[0\]/{print $3;exit}')
 [[ -n "$PHYSICAL" && -n "$UPSTREAM" ]] || exit 1
 curl --noproxy '*' -fsS --max-time 20 https://example.com/ -o /dev/null
 start --interface "$PHYSICAL" --dns "$UPSTREAM"
+# shellcheck disable=SC2034
 IFACE="$PHYSICAL"
 setup_physical_routes
 route -n add -net 0.0.0.0/1 -interface "$DEV"
