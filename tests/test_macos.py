@@ -76,7 +76,7 @@ class MacOSControllerTests(unittest.TestCase):
     def save(self, state): self.state.write_text(json.dumps(state))
     def read(self): return json.loads(self.state.read_text())
     def script(self, body, source='v6ctl.sh', ok=True):
-        code=f'source "{ROOT}/macos/{source}"\nrequire_root() {{ :; }}\n'+body
+        code=f'source "{ROOT}/macos/{source}"\nrequire_root() {{ :; }}\ncore_active() {{ [[ -f \"$STATE_DIR/fake-core\" ]]; }}\nstart_core() {{ touch \"$STATE_DIR/fake-core\"; }}\nstop_core() {{ rm -f \"$STATE_DIR/fake-core\"; }}\nvalidate_forwarding() {{ [[ ${{FAKE_FORWARD_FAIL:-0}} != 1 ]]; }}\nrules_signature() {{ printf mock; }}\n'+body
         r=subprocess.run(['/bin/bash','-c',code],env=self.env,text=True,capture_output=True)
         if ok: self.assertEqual(r.returncode,0,r.stdout+r.stderr)
         else: self.assertNotEqual(r.returncode,0,r.stdout+r.stderr)
@@ -88,7 +88,7 @@ class MacOSControllerTests(unittest.TestCase):
         self.on(); count=len(self.read()['writes'])
         self.on(); self.script('watch_once; watch_once',source='v6-watch.sh')
         self.assertEqual(len(self.read()['writes']),count)
-        self.assertEqual(self.read()['dns'],['202.112.128.50','202.112.128.51','2400:3200::1'])
+        self.assertEqual(self.read()['dns'],['202.112.128.50','202.112.128.51'])
 
     def test_rollback_restores_custom_settings_and_resolver(self):
         resolver=self.base/'resolver/gw.buaa.edu.cn'
@@ -208,5 +208,25 @@ class MacOSControllerTests(unittest.TestCase):
         (fake/'v6ctl.sh').write_text('echo attempt >> "$RUN_DIR/attempts"; exit 1\n')
         self.script(f'V6_DIR="{fake}"; watch_once; watch_once',source='v6-watch.sh')
         self.assertEqual((self.base/'run/attempts').read_text().splitlines(),['attempt'])
+
+    def test_end_to_end_validation_failure_restores_and_latches_pause(self):
+        self.env['FAKE_FORWARD_FAIL']='1'
+        self.on(ok=False)
+        self.assertEqual(self.read()['dns'],self.initial['dns'])
+        self.assertFalse((self.base/'state/fake-core').exists())
+        self.assertFalse((self.base/'run/v6only.active').exists())
+        self.assertEqual((self.base/'run/v6only.suspend').read_text(),'')
+        count=len(self.read()['writes'])
+        self.script('watch_once',source='v6-watch.sh')
+        self.assertEqual(len(self.read()['writes']),count)
+
+    def test_core_failure_stops_instead_of_reapplying(self):
+        self.on()
+        (self.base/'state/fake-core').unlink()
+        fake=self.base/'controller';fake.mkdir()
+        (fake/'v6ctl.sh').write_text('echo "$*" >> "$RUN_DIR/attempts"\n')
+        self.script(f'V6_DIR="{fake}"; watch_once; watch_once',source='v6-watch.sh')
+        self.assertEqual((self.base/'run/attempts').read_text().splitlines(),['off'])
+        self.assertEqual((self.base/'run/v6only.suspend').read_text(),'')
 
 if __name__ == '__main__': unittest.main()

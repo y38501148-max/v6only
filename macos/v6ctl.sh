@@ -57,7 +57,7 @@ restore() {
     if [[ -d "$ORIGINAL" ]]; then
         SERVICE=$(cat "$ORIGINAL/service")
         if dns=$(current_dns); then
-            if [[ "$dns" == "$(desired_dns)" ]]; then set_dns_file "$ORIGINAL/dns" || failed=1; fi
+            if [[ "$dns" == "$(desired_dns)" || "$dns" == $'202.112.128.50\n202.112.128.51\n2400:3200::1' ]]; then set_dns_file "$ORIGINAL/dns" || failed=1; fi
         else
             failed=1
         fi
@@ -89,6 +89,7 @@ restore() {
             pfctl -X "$token" || failed=1
         fi
     fi
+    stop_core || failed=1
     if [[ "$failed" -eq 0 ]]; then
         rm -rf "$ORIGINAL"
         rm -f "$MARKER" "$STATE_DIR/pf.loaded" "$STATE_DIR/pf.token" \
@@ -103,7 +104,13 @@ apply_failed() {
     trap - ERR
     set +e
     printf '配置失败，正在撤销本次管理的网络设置。\n' >&2
-    restore || printf '部分回滚失败，快照保留于 %s。\n' "$STATE_DIR" >&2
+    if restore; then
+        # A failed activation requires an explicit retry, never repeated network
+        # takeover in the background on the same broken configuration.
+        : > "$SUSPEND"
+    else
+        printf '部分回滚失败，快照保留于 %s。\n' "$STATE_DIR" >&2
+    fi
     exit "$status"
 }
 
@@ -131,6 +138,7 @@ on() {
         touch "$STATE_DIR/bypass.added"
         printf '%s\n' "$PORTAL_HOST" >> "$STATE_DIR/bypass.expected"
     fi
+    start_core
     networksetup -setdnsservers "$SERVICE" "${DNS_SERVERS[@]}"
     set_bypass_file "$STATE_DIR/bypass.expected"
     if [[ ! -d "$RESOLVER_DIR" ]]; then mkdir -m 755 "$RESOLVER_DIR"; fi
@@ -151,9 +159,10 @@ on() {
     rules_signature > "$STATE_DIR/rules.signature"
     touch "$MARKER"
     configuration_active || die '配置读回校验失败。'
+    validate_forwarding || die '转发后的 DNS/TLS 连通性验证失败，恢复原网络。'
     rm -f "$SUSPEND"
     trap - ERR
-    printf '已应用双栈 DNS 与独立 PF 规则；应用最终可能使用 IPv4 或 IPv6。\n'
+    printf '已应用 IPv6 优先转发；同域名的 IPv6 连接全部失败后才回退 IPv4。\n'
 }
 
 off() {
@@ -175,7 +184,7 @@ main() {
         on) lock; on;;
         off) lock; off "${2:-manual}";;
         status)
-            if configuration_active; then printf '配置生效（不保证所有连接使用 IPv6）。\n';
+            if configuration_active; then printf 'IPv6 优先转发已生效。\n';
             else die '配置未完整生效。'; fi;;
         *) die '用法：v6ctl.sh on | off [auto] | status';;
     esac

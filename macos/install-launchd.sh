@@ -9,7 +9,7 @@ LIB=/usr/local/lib/v6only
 PLIST_ID=edu.buaa.v6only-watch
 PLIST="/Library/LaunchDaemons/$PLIST_ID.plist"
 MODE="${1:-}"
-FILES=(v6-common.sh v6ctl.sh v6on.sh v6off.sh v6-watch.sh test-suite.sh uninstall.sh anchor-v6only)
+FILES=(v6-runtime.sh v6core v6-common.sh v6ctl.sh v6on.sh v6off.sh v6-watch.sh test-suite.sh uninstall.sh anchor-v6only)
 for file in "${FILES[@]}"; do
     [[ -f "$V6_DIR/$file" ]] || die "缺少源文件：$file"
     if [[ "$file" == *.sh ]]; then /bin/bash -n "$V6_DIR/$file"; fi
@@ -52,6 +52,7 @@ for file in "${FILES[@]}"; do cp "$V6_DIR/$file" "$STAGE/$file"; done
 chown -R root:wheel "$STAGE"
 chmod 755 "$STAGE" "$STAGE"/*.sh
 chmod 644 "$STAGE/anchor-v6only"
+chmod 755 "$STAGE/v6core"
 WAS_RUNNING=0
 if launchctl print "system/$PLIST_ID" >/dev/null 2>&1; then WAS_RUNNING=1; fi
 
@@ -97,6 +98,9 @@ for _attempt in 1 2 3 4 5; do
 done
 if pgrep -f '^/bin/bash /usr/local/lib/v6only/v6(on|off)\.sh' >/dev/null; then
     die '旧版配置操作仍在运行，停止安装。'
+fi
+if launchctl print system/edu.buaa.v6only-core >/dev/null 2>&1; then
+    /bin/bash "$LIB/v6ctl.sh" off auto
 fi
 if [[ "$MIGRATE" -eq 1 ]]; then pfctl -f /etc/pf.conf; fi
 if [[ -d "$LIB" ]]; then mv "$LIB" "$BACKUP/replaced-lib"; fi

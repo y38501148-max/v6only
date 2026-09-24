@@ -5,9 +5,9 @@ V6_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IFACE="${IFACE:-en0}"
 SERVICE="${SERVICE:-Wi-Fi}"
 CAMPUS_DNS=(202.112.128.50 202.112.128.51)
-# Campus resolvers return both A and AAAA, including internal names. Public
-# IPv6 DNS can time out for off-campus domains here; keep it as fallback only.
-DNS_SERVERS=("${CAMPUS_DNS[@]}" 2400:3200::1)
+# DNS remains usable if the core exits. TUN handles intercepted DNS in flight;
+# never leave the entire system pointing at a process-local DNS listener.
+DNS_SERVERS=("${CAMPUS_DNS[@]}")
 PORTAL_HOST=gw.buaa.edu.cn
 PF_ANCHOR=com.apple/v6only
 STATE_DIR="${STATE_DIR:-/var/db/v6only}"
@@ -25,7 +25,7 @@ die() { printf 'v6only: %s\n' "$*" >&2; return 1; }
 require_root() { [[ $EUID -eq 0 ]] || die '需要管理员权限，请使用 sudo。'; }
 desired_dns() { printf '%s\n' "${DNS_SERVERS[@]}"; }
 desired_resolver() { printf 'nameserver %s\n' "${CAMPUS_DNS[@]}"; }
-rules_signature() { printf '%s\n' "$IFACE"; cksum < "$V6_DIR/anchor-v6only"; }
+rules_signature() { printf '%s\n' "$IFACE"; cksum < "$V6_DIR/anchor-v6only"; cksum < "$V6_DIR/v6core"; }
 
 # Query this network service, not scutil's first (possibly VPN) resolver.
 current_dns() {
@@ -58,7 +58,7 @@ configuration_active() {
     [[ "$(cat "$ORIGINAL/service")" == "$SERVICE" ]] || return 1
     [[ -f "$STATE_DIR/rules.signature" ]] || return 1
     [[ "$(cat "$STATE_DIR/rules.signature")" == "$(rules_signature)" ]] || return 1
-    dns_active && pf_active || return 1
+    dns_active && pf_active && core_active || return 1
     bypass_active || return 1
     [[ -f "$RESOLVER_DIR/$PORTAL_HOST" ]] || return 1
     [[ "$(cat "$RESOLVER_DIR/$PORTAL_HOST")" == "$(desired_resolver)" ]]
@@ -93,3 +93,7 @@ suspended() {
     rm -f "$SUSPEND"
     return 1
 }
+
+# Runtime functions are shared by the controller, watcher and diagnostics.
+# shellcheck source=macos/v6-runtime.sh
+source "$V6_DIR/v6-runtime.sh"

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="edu.buaa.v6only"
-    android:versionCode="4"
-    android:versionName="1.0.3">
+    android:versionCode="5"
+    android:versionName="1.1.0">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34"/>
 
@@ -38,8 +38,8 @@
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                      android:value="User-enabled network monitoring and IPv6-preferred DNS configuration"/>
-            <!-- Split routing and off-campus standby cannot satisfy VPN lockdown. -->
+                      android:value="Campus-only IPv6-first traffic forwarding and network monitoring"/>
+            <!-- Off-campus standby deliberately restores the ordinary network. -->
             <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
                        android:value="false"/>
             <intent-filter>
