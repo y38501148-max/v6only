@@ -4,3 +4,5 @@ out/
 *.apk
 *.keystore
 android/build/
+
+*.apk.idsig

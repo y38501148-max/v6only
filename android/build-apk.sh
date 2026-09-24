@@ -5,12 +5,10 @@
 
 set -euo pipefail
 
-SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
-BT="$SDK/build-tools/35.0.0"
-PLATFORM="$SDK/platforms/android-36/android.jar"
 PROJ="$(cd "$(dirname "$0")" && pwd)"
+source "$PROJ/sdk-env.sh"
 OUT="$PROJ/build"
-KEYSTORE="$PROJ/debug.keystore"
+KEYSTORE="${V6ONLY_KEYSTORE:-$PROJ/debug.keystore}"
 
 rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/obj" "$OUT/apk"
 
@@ -46,14 +44,21 @@ echo "[5/6] zipalign"
 "$BT/zipalign" -f 4 base.apk aligned.apk
 
 echo "[6/6] apksigner 签名"
-if [[ ! -f "$KEYSTORE" ]]; then
+if [[ -n "${V6ONLY_KEYSTORE:-}" ]]; then
+  : "${V6ONLY_STORE_PASSWORD:?Set V6ONLY_STORE_PASSWORD for the release keystore}"
+  : "${V6ONLY_KEY_PASSWORD:=$V6ONLY_STORE_PASSWORD}"
+  export V6ONLY_STORE_PASSWORD V6ONLY_KEY_PASSWORD
+elif [[ ! -f "$KEYSTORE" ]]; then
   keytool -genkeypair -keystore "$KEYSTORE" -storepass v6only -keypass v6only \
     -alias v6only -keyalg RSA -keysize 2048 -validity 10000 \
     -dname "CN=v6only, OU=rev, O=buaa, C=CN" >/dev/null 2>&1
 fi
+export V6ONLY_STORE_PASSWORD="${V6ONLY_STORE_PASSWORD:-v6only}"
+export V6ONLY_KEY_PASSWORD="${V6ONLY_KEY_PASSWORD:-v6only}"
 "$BT/apksigner" sign \
-  --ks "$KEYSTORE" --ks-pass pass:v6only --key-pass pass:v6only \
-  --out "$PROJ/v6only.apk" aligned.apk
+  --ks "$KEYSTORE" --ks-key-alias "${V6ONLY_KEY_ALIAS:-v6only}" \
+  --ks-pass env:V6ONLY_STORE_PASSWORD --key-pass env:V6ONLY_KEY_PASSWORD \
+  --v4-signing-enabled false --out "$PROJ/v6only.apk" aligned.apk
 
 "$BT/apksigner" verify --print-certs "$PROJ/v6only.apk" | head -4
 echo
