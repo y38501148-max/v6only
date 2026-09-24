@@ -1,0 +1,11 @@
+<resources>
+    <dimen name="page_top_padding">22dp</dimen>
+    <dimen name="header_bottom_margin">24dp</dimen>
+    <dimen name="hero_padding">24dp</dimen>
+    <dimen name="hero_title_size">29sp</dimen>
+    <dimen name="hero_title_gap">22dp</dimen>
+    <dimen name="hero_description_gap">9dp</dimen>
+    <dimen name="hero_action_gap">22dp</dimen>
+    <dimen name="hero_note_gap">13dp</dimen>
+    <integer name="hero_description_lines">2</integer>
+</resources>

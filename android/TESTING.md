@@ -14,7 +14,7 @@ shellcheck -S warning android/build-apk.sh android/sdk-env.sh android/test.sh an
 
 ## Campus-only policy update
 
-All modes now require campus evidence. Manual mode cannot connect on an ordinary emulator/home network; leaving campus stops manual service. Automatic mode remains in standby outside campus. The 32 host checks cover this stricter condition.
+All modes now require campus evidence. Manual mode cannot connect on an ordinary emulator/home network; leaving campus stops manual service. Automatic mode remains in standby outside campus. The 32 host checks cover this stricter condition. API 36 emulator validation also passed manual refusal, automatic standby without a VPN, Recents removal, explicit stop and all four UI layout scenarios.
 
 The device script has two branches: a normal non-campus emulator verifies manual refusal, automatic standby, task removal and explicit stop; tunnel routing checks run only with a recognized campus fixture. Its output explicitly reports skipped tunnel checks. The older full-network results below describe PR #1 before the campus-only constraint and must not be reported as a fresh full-device pass for this policy update.
 
@@ -42,6 +42,17 @@ Verified on the API 36 arm64 Google APIs emulator:
 - Explicit stop closes the TUN, clears persisted enablement and is not undone by a restore command.
 
 `device-test.sh` writes the full result to `android/build/device-tests/result.txt`. A failed assertion or missing final success marker fails the script. The emulator's built-in DNS proxy does not provide reliable TCP DNS service; a separate controlled DNS/TCP fixture avoids mistaking that emulator limitation for an app regression.
+
+## UI interaction and visual checks
+
+```sh
+# Build and install both packages, then run network checks plus the UI checks.
+ANDROID_SERIAL=emulator-5580 V6ONLY_TEST_SUITE=all bash android/device-test.sh
+# Or rerun UI checks against the already installed matching packages:
+ANDROID_SERIAL=emulator-5580 bash android/ui-test.sh
+```
+
+`V6ONLY_TEST_SUITE=ui` builds and runs only UI checks. The UI suite drives actual native views: mode choice while stopped, start, campus-only refusal (or connected feedback on campus), automatic standby, stop and help expansion/restoration across Activity recreation. It validates touch targets of at least 48dp and text/layout bounds in light, dark, compact 320dp width at font scale 1.5, and landscape configurations. Emulator display/font/night settings are reset after the suite. Captured PNGs are saved in `android/build/ui-tests/ui-checks/` for visual inspection, including off-campus refusal and waiting states (connected states require a campus fixture). They are actual emulator screenshots.
 
 ## Device lifecycle recovery
 

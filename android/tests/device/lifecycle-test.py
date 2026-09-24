@@ -30,7 +30,7 @@ wait(lambda: foreground() and vpn() == EXPECT_VPN, 'automatic foreground service
 shell('cmd', 'connectivity', 'airplane-mode', 'enable')
 shell('svc', 'data', 'disable')
 shell('svc', 'wifi', 'disable')
-wait(lambda: not vpn() == EXPECT_VPN and foreground(), 'Wi-Fi loss removes VPN but keeps service')
+wait(lambda: not vpn() and foreground(), 'Wi-Fi loss removes VPN but keeps service')
 shell('cmd', 'connectivity', 'airplane-mode', 'disable')
 shell('svc', 'wifi', 'enable')
 wait(lambda: vpn() == EXPECT_VPN and foreground(), 'Wi-Fi return preserves campus-only policy')

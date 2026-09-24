@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="edu.buaa.v6only"
-    android:versionCode="2"
-    android:versionName="1.0.1">
+    android:versionCode="4"
+    android:versionName="1.0.3">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34"/>
 
@@ -21,7 +21,7 @@
     <application
         android:label="v6only"
         android:icon="@drawable/ic_launcher"
-        android:theme="@android:style/Theme.Material.Light"
+        android:theme="@style/AppTheme"
         android:allowBackup="false">
 
         <activity android:name=".MainActivity" android:exported="true">

@@ -1,0 +1,109 @@
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/scroll" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:scrollbars="none" android:fillViewport="true" android:background="@color/page" android:clipToPadding="false">
+    <LinearLayout android:id="@+id/content" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:layout_gravity="center_horizontal" android:paddingHorizontal="20dp"
+        android:paddingTop="@dimen/page_top_padding" android:paddingBottom="28dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="@dimen/header_bottom_margin">
+            <ImageView android:layout_width="46dp" android:layout_height="46dp" android:padding="11dp"
+                android:src="@drawable/ic_network" android:background="@drawable/bg_icon" android:importantForAccessibility="no"/>
+            <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:orientation="vertical" android:layout_marginStart="12dp">
+                <TextView style="@style/SectionTitle" android:text="v6only" android:textSize="25sp" android:fontFamily="sans-serif-black"/>
+                <TextView style="@style/BodyText" android:text="校园网络助手" android:textSize="12sp" android:layout_marginTop="3dp"/>
+            </LinearLayout>
+            <TextView android:id="@+id/version" style="@style/BodyText" android:layout_width="wrap_content"
+                android:background="@drawable/bg_badge" android:paddingHorizontal="9dp" android:paddingVertical="5dp" android:textSize="11sp"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_hero" android:padding="@dimen/hero_padding">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView style="@style/BodyText" android:layout_width="0dp" android:layout_weight="1" android:text="当前连接"
+                    android:textColor="@color/hero_muted" android:textSize="13sp"/>
+                <TextView android:id="@+id/state_badge" style="@style/BodyText" android:layout_width="wrap_content"
+                    android:textSize="12sp" android:textColor="#FFFFFF" android:background="@drawable/bg_hero_badge"
+                    android:paddingHorizontal="10dp" android:paddingVertical="5dp"/>
+            </LinearLayout>
+            <TextView android:id="@+id/status_title" style="@style/SectionTitle" android:textSize="@dimen/hero_title_size" android:textColor="#FFFFFF"
+                android:layout_marginTop="@dimen/hero_title_gap" android:accessibilityLiveRegion="polite"/>
+            <TextView android:id="@+id/status_description" style="@style/BodyText" android:textColor="@color/hero_muted"
+                android:layout_marginTop="@dimen/hero_description_gap" android:minLines="@integer/hero_description_lines"/>
+            <Button android:id="@+id/toggle_service" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:minHeight="54dp" android:layout_marginTop="@dimen/hero_action_gap" android:padding="13dp"
+                android:background="@drawable/bg_hero_button" android:backgroundTint="#FFFFFF" android:foreground="?android:attr/selectableItemBackground"
+                android:textColor="#172C4B" android:textSize="16sp" android:fontFamily="sans-serif-medium" android:textAllCaps="false"/>
+            <TextView style="@style/BodyText" android:text="保留 IPv4 访问 · 支持原生 IPv6" android:textSize="11sp" android:textColor="@color/hero_muted"
+                android:gravity="center" android:layout_marginTop="@dimen/hero_note_gap"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:layout_marginTop="14dp" android:paddingHorizontal="4dp">
+            <TextView android:id="@+id/network_status" style="@style/BodyText" android:textSize="12sp"/>
+            <TextView android:id="@+id/background_status" style="@style/BodyText" android:textSize="12sp" android:layout_marginTop="5dp"/>
+        </LinearLayout>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:padding="20dp" android:layout_marginTop="24dp">
+            <TextView style="@style/SectionTitle" android:text="连接方式"/>
+            <RadioGroup android:id="@+id/mode_group" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:padding="4dp" android:background="@drawable/bg_soft" android:layout_marginTop="15dp">
+                <RadioButton android:id="@+id/mode_auto" style="@style/ModeButton" android:text="自动"/>
+                <RadioButton android:id="@+id/mode_manual" style="@style/ModeButton" android:text="手动"/>
+            </RadioGroup>
+            <TextView android:id="@+id/mode_description" style="@style/BodyText" android:textSize="13sp" android:layout_marginTop="13dp"/>
+        </LinearLayout>
+
+        <TextView style="@style/SectionTitle" android:text="后台与识别" android:layout_marginTop="26dp" android:layout_marginBottom="12dp" android:paddingStart="4dp"/>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_card" android:clipToOutline="true">
+            <LinearLayout android:id="@+id/wifi_row" style="@style/SettingRow">
+                <ImageView android:layout_width="40dp" android:layout_height="40dp" android:padding="10dp" android:src="@drawable/ic_wifi"
+                    android:background="@drawable/bg_icon" android:importantForAccessibility="no"/>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:orientation="vertical" android:layout_marginHorizontal="12dp">
+                    <TextView style="@style/SectionTitle" android:text="校园网识别" android:textSize="14sp" android:accessibilityHeading="false"/>
+                    <TextView android:id="@+id/wifi_detail" style="@style/BodyText" android:textSize="12sp" android:layout_marginTop="4dp"/>
+                </LinearLayout>
+                <ImageView android:layout_width="16dp" android:layout_height="16dp" android:src="@drawable/ic_chevron"
+                    android:tint="@color/muted" android:importantForAccessibility="no"/>
+            </LinearLayout>
+            <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginHorizontal="18dp" android:background="@color/line"/>
+            <LinearLayout android:id="@+id/battery_row" style="@style/SettingRow">
+                <ImageView android:layout_width="40dp" android:layout_height="40dp" android:padding="10dp" android:src="@drawable/ic_battery"
+                    android:background="@drawable/bg_icon" android:importantForAccessibility="no"/>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:orientation="vertical" android:layout_marginHorizontal="12dp">
+                    <TextView style="@style/SectionTitle" android:text="后台运行" android:textSize="14sp" android:accessibilityHeading="false"/>
+                    <TextView android:id="@+id/battery_detail" style="@style/BodyText" android:textSize="12sp" android:layout_marginTop="4dp"/>
+                </LinearLayout>
+                <ImageView android:layout_width="16dp" android:layout_height="16dp" android:src="@drawable/ic_chevron"
+                    android:tint="@color/muted" android:importantForAccessibility="no"/>
+            </LinearLayout>
+            <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginHorizontal="18dp" android:background="@color/line"/>
+            <LinearLayout android:id="@+id/notification_row" style="@style/SettingRow">
+                <ImageView android:layout_width="40dp" android:layout_height="40dp" android:padding="10dp" android:src="@drawable/ic_bell"
+                    android:background="@drawable/bg_icon" android:importantForAccessibility="no"/>
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:orientation="vertical" android:layout_marginHorizontal="12dp">
+                    <TextView style="@style/SectionTitle" android:text="服务通知" android:textSize="14sp" android:accessibilityHeading="false"/>
+                    <TextView android:id="@+id/notification_detail" style="@style/BodyText" android:textSize="12sp" android:layout_marginTop="4dp"/>
+                </LinearLayout>
+                <ImageView android:layout_width="16dp" android:layout_height="16dp" android:src="@drawable/ic_chevron"
+                    android:tint="@color/muted" android:importantForAccessibility="no"/>
+            </LinearLayout>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/tips_toggle" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="56dp"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="4dp" android:layout_marginTop="10dp"
+            android:background="?android:attr/selectableItemBackground" android:clickable="true" android:focusable="true" android:screenReaderFocusable="true">
+            <TextView style="@style/BodyText" android:layout_width="0dp" android:layout_weight="1" android:text="使用提示与 iQOO 设置" android:textSize="13sp"/>
+            <ImageView android:id="@+id/tips_arrow" android:layout_width="18dp" android:layout_height="18dp"
+                android:src="@drawable/ic_chevron_down" android:tint="@color/muted" android:importantForAccessibility="no"/>
+        </LinearLayout>
+        <TextView android:id="@+id/tips_content" style="@style/BodyText" android:visibility="gone" android:textSize="13sp"
+            android:padding="16dp" android:background="@drawable/bg_soft"
+            android:text="@string/usage_tips"/>
+        <TextView style="@style/BodyText" android:text="让校园连接更从容" android:gravity="center" android:textSize="11sp" android:layout_marginTop="22dp"/>
+    </LinearLayout>
+</ScrollView>

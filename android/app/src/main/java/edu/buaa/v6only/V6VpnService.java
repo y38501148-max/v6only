@@ -35,6 +35,7 @@ public class V6VpnService extends VpnService {
     private ParcelFileDescriptor tun;
     private String configuration = "";
     private boolean destroyed;
+    private boolean stopping;
 
     @Override public void onCreate() {
         super.onCreate();
@@ -181,6 +182,7 @@ public class V6VpnService extends VpnService {
     }
 
     private void stopEverything() {
+        stopping = true;
         handler.removeCallbacks(retry);
         watcher.stop();
         closeTun();
@@ -212,7 +214,8 @@ public class V6VpnService extends VpnService {
         watcher.stop();
         closeTun();
         V6VpnServiceExt.setMonitoring(false);
-        publish("服务已停止");
+        // Keep the reason for an explicit shutdown visible after service destruction.
+        publish(stopping ? V6VpnServiceExt.message() : "服务已停止");
         super.onDestroy();
     }
 }
