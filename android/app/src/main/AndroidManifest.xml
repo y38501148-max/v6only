@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="edu.buaa.v6only"
-    android:versionCode="1"
-    android:versionName="1.0">
+    android:versionCode="2"
+    android:versionName="1.0.1">
 
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34"/>
 
@@ -13,8 +13,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <!-- Android 10+ 后台取 SSID 需要定位权限；但本 APK 用「DNS 搜索域」做主信号，SSID 只是辅助 -->
+    <!-- SSID is optional; DNS/domain detection needs no location permission. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
 
     <application
         android:label="v6only"
@@ -32,10 +34,14 @@
         <service
             android:name=".V6VpnService"
             android:exported="false"
+            android:stopWithTask="false"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                      android:value="ipv6-only traffic enforcement"/>
+                      android:value="User-enabled network monitoring and IPv6-preferred DNS configuration"/>
+            <!-- Split routing and off-campus standby cannot satisfy VPN lockdown. -->
+            <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+                       android:value="false"/>
             <intent-filter>
                 <action android:name="android.net.VpnService"/>
             </intent-filter>
@@ -44,6 +50,7 @@
         <receiver android:name=".BootReceiver" android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
             </intent-filter>
         </receiver>
     </application>

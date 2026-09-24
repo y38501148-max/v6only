@@ -28,7 +28,7 @@
 |---|---|---|---|
 | **macOS** | pf（封外部 v4 DNS）+ networksetup DNS + launchd 守护 | LaunchDaemon | ✅ 实机验收通过 |
 | **Windows** | NetFirewall 封外部 v4 DNS + DnsClient API + 计划任务（SYSTEM） | ScheduledTask | ✅ CI 验证（API 级） |
-| **Android** | 原生 VpnService：v4 进 TUN 白名单放行 10/8，v6 不进 TUN 走原生栈 | BOOT_COMPLETED + NetworkCallback | ✅ 模拟器验收通过 |
+| **Android** | 原生 VpnService 配置真实 DNS；IPv4/IPv6 流量由系统直连 | 前台服务 + BOOT_COMPLETED + NetworkCallback | 见 [Android 验证说明](android/TESTING.md) |
 
 ## macOS 使用
 
@@ -58,14 +58,23 @@ cd windows
 
 ## Android 使用
 
-1. 安装 Release 里的 `v6only.apk`（或自行构建：`cd android && ./build-apk.sh`）
-2. 打开 APP → 点一次「启动 VPN」（系统一次性 VpnService 授权）
-3. 之后全自动：开机自启 → 检测到校园网（DNS 后缀/网关/SSID 多信号）→ 静默接管；离开 → 静默还原
-4. 「自动模式」可一键关闭变纯手动
+1. 安装 `v6only.apk`（本地构建：`cd android && ./build-apk.sh`），打开应用并点击「启动服务」授予 VPN 权限。
+2. 默认自动模式：校园 DNS（`202.112.128.50/51`）、`buaa.edu.cn` 搜索域或 BUAA Wi-Fi 名称匹配时连接；离开校园网后断开 VPN，**前台服务继续监听**。普通 `10.x` 私网、蜂窝网络、VPN 自身不再作为校园网证据。
+3. 若网络未提供校园 DNS／域名，可通过「授权校园 Wi-Fi 名称识别」授予精确位置权限并打开系统定位；后台识别新接入的 Wi-Fi 还需在系统位置权限中选择「始终允许」。应用只读取 Wi-Fi 名称，不读取坐标。SSID 不可读取时，界面会显示未识别到；可关闭自动模式使用手动连接。
+4. 关闭自动模式会立即切换到手动连接；点击「停止服务」同时停止 VPN 和自动监听，不会因网络变化自行重启。下次启动恢复保存的模式。
+5. 划掉最近任务不停止前台服务。已启用的服务会在系统回收后尝试恢复，并在重启／应用更新后恢复；从未启用或明确停止的服务不会自动开启。
+6. **iQOO／vivo**：在系统设置中允许应用自启动和后台运行（部分版本称为「后台高耗电」），将电池策略改为不限制，并在最近任务中锁定应用。应用内提供电池和应用设置入口。厂商强制清理、系统「强行停止」无法由应用保证恢复；强行停止后需手动打开应用。
 
-技术要点：`addRoute(0.0.0.0/0)` 吸走全部 v4、用户态 pump 白名单放行 `10/8`、
-API 33+ 用 `excludeRoute` 硬排除校内段；**v6 不 addRoute，完全不进 VPN**（零开销）；
-校园网检测用 `LinkProperties`（DNS/网关/域名）而非 SSID（Android 10+ 取 SSID 需定位权限且不可靠）。
+Android 1.0.1 修复说明：
+
+- 移除 `0.0.0.0/0` 全量捕获、丢弃 IPv4、TUN 原样回写和没有转发器的虚假 DNS。
+- 使用当前物理网络下发的真实 DNS，优先列出有路由的 IPv6 DNS，保留 IPv4 DNS；不篡改 A／AAAA 回答，保留校内域名解析。
+- 显式 `allowFamily(AF_INET)` 与 `allowFamily(AF_INET6)`；不添加默认路由，DNS、TCP、UDP、IPv4 和 IPv6 由 Android 原生网络栈处理。仅不添加 IPv6 路由并不会自动放行 IPv6。
+- 这不是加密隧道或全流量防火墙，也不强制浏览器使用 IPv6。网站最终走 IPv4 还是 IPv6 取决于可达性、系统与浏览器的地址选择；浏览器自带 DoH／系统私人 DNS 保持其各自行为。
+- 自动模式由前台服务持有网络回调，支持断网等待、链路属性变化和恢复；VPN 成功建立后才显示已连接，停止时实际关闭文件描述符。
+- 此分流模式不支持「阻止未通过 VPN 的连接」；已声明不支持系统始终开启 VPN，避免该选项导致直连流量被阻断。
+
+构建默认使用本地调试证书。**调试包不能覆盖不同证书签名的旧 Release**，需使用原发布密钥重新签名，或卸载旧包后安装（会清除旧设置）。正式签名可设置 `V6ONLY_KEYSTORE`、`V6ONLY_KEY_ALIAS`、`V6ONLY_STORE_PASSWORD`、`V6ONLY_KEY_PASSWORD` 环境变量后运行构建脚本；不要提交密钥或密码。SDK 通过 `ANDROID_HOME` 定位，也可覆盖 `ANDROID_BUILD_TOOLS` 和 `ANDROID_PLATFORM_JAR`。
 
 ## CI
 

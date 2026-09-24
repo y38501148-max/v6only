@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="edu.buaa.v6only.tests">
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <application android:label="v6only regression tests"/>
+    <instrumentation android:name=".NetworkSmoke" android:targetPackage="edu.buaa.v6only"/>
+</manifest>
