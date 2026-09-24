@@ -58,17 +58,31 @@ jobs:
               Remove-NetFirewallRule
           }
 
-      - name: 计划任务注册语法验证（真实 ScheduledTasks 模块）
+      - name: 计划任务注册与停止验证（真实 ScheduledTasks 模块）
         shell: pwsh
         run: |
-          $action  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -Command exit 0"
-          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/windows/v6only.ps1", [ref]$null, [ref]$null)
+          $fn = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Stop-V6Task' }, $false)
+          . ([scriptblock]::Create($fn[0].Extent.Text))
+          $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -Command Start-Sleep -Seconds 60"
+          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5)
           $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
-          $t = Register-ScheduledTask -TaskName 'ci-test-task' -Action $action -Trigger $trigger `
-                 -Principal $principal -Force
-          if ($t.TaskName -ne 'ci-test-task') { exit 1 }
-          Unregister-ScheduledTask -TaskName 'ci-test-task' -Confirm:$false
-          Write-Host "✓ 计划任务 API 验证通过"
+          try {
+            Register-ScheduledTask -TaskName 'ci-test-task' -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+            Start-ScheduledTask -TaskName 'ci-test-task'
+            for ($i = 0; $i -lt 20; $i++) {
+              if ((Get-ScheduledTask 'ci-test-task').State -eq 'Running') { break }
+              Start-Sleep -Milliseconds 250
+            }
+            if ((Get-ScheduledTask 'ci-test-task').State -ne 'Running') { throw 'Fixture did not start' }
+            Stop-V6Task -TaskName 'ci-test-task'
+            if ((Get-ScheduledTask 'ci-test-task').State -ne 'Disabled') { throw 'Task not stopped and disabled' }
+            Write-Host '✓ Running scheduled task stopped before cleanup'
+          } finally {
+            Stop-ScheduledTask -TaskName 'ci-test-task' -ErrorAction SilentlyContinue
+            Unregister-ScheduledTask -TaskName 'ci-test-task' -Confirm:$false -ErrorAction SilentlyContinue
+          }
 
       - name: DNS 配置 API 冒烟（真实 DnsClient 模块）
         shell: pwsh
