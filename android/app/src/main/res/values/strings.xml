@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">v6only</string>
+    <string name="notif_title">v6only 已接管</string>
+    <string name="notif_text">校园网检测到，非白名单 IPv4 已封堵，全量走 IPv6</string>
+</resources>

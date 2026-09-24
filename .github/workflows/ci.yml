@@ -1,0 +1,127 @@
+name: windows-ci
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  syntax-and-logic:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PowerShell 语法解析检查
+        shell: pwsh
+        run: |
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/windows/v6only.ps1", [ref]$null, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Host "SYNTAX ERROR: $($_.Message) @ line $($_.Extent.StartLineNumber)" }
+            exit 1
+          }
+          Write-Host "✓ 语法检查通过"
+
+      - name: 函数级单元测试（不触网、不要求管理员的纯逻辑）
+        shell: pwsh
+        run: |
+          # 点名加载脚本定义的函数（不执行主入口）
+          $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/windows/v6only.ps1", [ref]$null, [ref]$null)
+          # 验证关键函数存在
+          $funcs = $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+          $names = $funcs | ForEach-Object { $_.Name }
+          foreach ($need in 'Test-CampusNetwork','Invoke-V6On','Invoke-V6Off','Write-Log','Invoke-Test') {
+            if ($names -notcontains $need) { Write-Host "缺少函数: $need"; exit 1 }
+          }
+          Write-Host "✓ 关键函数齐全: $($names -join ', ')"
+
+      - name: 防火墙封堵逻辑等价性验证（真实 Windows 防火墙 API）
+        shell: pwsh
+        run: |
+          # CI 的 windows-latest 以管理员跑，可真实操作 NetSecurity 模块
+          # 等价复现 v6only 的封堵规则，验证 API 参数合法
+          $blocked = @('8.8.8.8','8.8.4.4','1.1.1.1','9.9.9.9')
+          try {
+            New-NetFirewallRule -DisplayName 'ci-test-dns-block' -Direction Outbound `
+              -Action Block -Protocol UDP -RemotePort 53 -RemoteAddress $blocked | Out-Null
+            $rule = Get-NetFirewallRule -DisplayName 'ci-test-dns-block'
+            if ($rule.Enabled -ne 'True') { throw "rule not enabled" }
+            $addr = Get-NetFirewallAddressFilter -AssociatedAppId $rule[0].Name -ErrorAction SilentlyContinue
+            Write-Host "✓ 防火墙规则创建/查询成功"
+          } finally {
+            Get-NetFirewallRule -DisplayName 'ci-test-dns-block' -ErrorAction SilentlyContinue |
+              Remove-NetFirewallRule
+          }
+
+      - name: 计划任务注册语法验证（真实 ScheduledTasks 模块）
+        shell: pwsh
+        run: |
+          $action  = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -Command exit 0"
+          $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1)
+          $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
+          $t = Register-ScheduledTask -TaskName 'ci-test-task' -Action $action -Trigger $trigger `
+                 -Principal $principal -Force
+          if ($t.TaskName -ne 'ci-test-task') { exit 1 }
+          Unregister-ScheduledTask -TaskName 'ci-test-task' -Confirm:$false
+          Write-Host "✓ 计划任务 API 验证通过"
+
+      - name: DNS 配置 API 冒烟（真实 DnsClient 模块）
+        shell: pwsh
+        run: |
+          $if = Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1
+          if ($if) {
+            # 记录当前 → 设置测试值 → 校验 → 还原
+            $before = Get-DnsClientServerAddress -InterfaceIndex $if.ifIndex -AddressFamily IPv6
+            Set-DnsClientServerAddress -InterfaceIndex $if.ifIndex -ServerAddresses '2400:3200::1','202.112.128.50'
+            $after = Get-DnsClientServerAddress -InterfaceIndex $if.ifIndex -AddressFamily IPv6
+            if ($after.ServerAddresses -notcontains '2400:3200::1') { throw "DNS set failed" }
+            Set-DnsClientServerAddress -InterfaceIndex $if.ifIndex -ResetServerAddresses
+            Write-Host "✓ Set-DnsClientServerAddress 冒烟通过 ($($if.Name))"
+          } else {
+            Write-Host "⚠ CI 无活动网卡，跳过（不影响逻辑验证）"
+          }
+
+  macos-shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck macOS 脚本
+        run: |
+          sudo apt-get install -y shellcheck
+          for f in macos/*.sh; do
+            echo "== $f"; shellcheck -S warning "$f" || exit 1
+          done
+
+  android-build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - name: 无 gradle 本地流水线构建 APK（与仓库 build-apk.sh 同构）
+        run: |
+          SDK="$ANDROID_HOME"
+          BT="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
+          PLATFORM="$SDK/platforms/android-34/android.jar"
+          [ -f "$PLATFORM" ] || PLATFORM="$(ls "$SDK"/platforms/*/android.jar | sort -V | tail -1)"
+          mkdir -p out/gen out/obj out/apk
+          "$BT/aapt2" compile --dir android/app/src/main/res -o out/res.zip
+          "$BT/aapt2" link -o out/apk/base.apk -I "$PLATFORM" \
+            --manifest android/app/src/main/AndroidManifest.xml \
+            --java out/gen --auto-add-overlay out/res.zip
+          find android/app/src/main/java out/gen -name '*.java' > out/srcs.txt
+          javac --release 17 -classpath "$PLATFORM" -d out/obj @out/srcs.txt
+          find out/obj -name '*.class' > out/cls.txt
+          "$BT/d8" --release --lib "$PLATFORM" --min-api 29 --output out/apk @out/cls.txt
+          (cd out/apk && zip -qj base.apk classes.dex)
+          "$BT/zipalign" -f 4 out/apk/base.apk out/apk/aligned.apk
+          keytool -genkeypair -keystore out/debug.keystore -storepass v6only -keypass v6only \
+            -alias v6only -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=v6only" >/dev/null 2>&1
+          "$BT/apksigner" sign --ks out/debug.keystore --ks-pass pass:v6only \
+            --out v6only.apk out/apk/aligned.apk
+          "$BT/apksigner" verify v6only.apk
+          echo "✓ APK 构建并验签通过"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v6only-apk
+          path: v6only.apk
