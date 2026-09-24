@@ -10,6 +10,8 @@ public final class HandoverVpn extends V6VpnService {
         super.onCreate();
     }
     @Override protected void reconcile(CampusWatcher.State state) {
+        android.util.Log.i("HandoverVpn", "Reconcile physical=" + state.network
+                + " caps=" + state.capabilities);
         if (state.capabilities != null && state.capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI))
             state = new CampusWatcher.State(state.network, state.links, state.capabilities, "模拟校园 Wi-Fi");
         super.reconcile(state);

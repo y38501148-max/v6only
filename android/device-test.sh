@@ -30,7 +30,7 @@ cleanup() {
   if [[ $result -ne 0 ]]; then
     "${ADB[@]}" shell dumpsys connectivity > "$OUT/connectivity.log" 2>&1 || true
     "${ADB[@]}" shell ip route show table all > "$OUT/routes.log" 2>&1 || true
-    "${ADB[@]}" logcat -d -s V6VpnService AndroidRuntime > "$OUT/service.log" 2>&1 || true
+    "${ADB[@]}" logcat -d -v threadtime > "$OUT/service.log" 2>&1 || true
   fi
   kill "$SERVER_PID" 2>/dev/null || true
 }
@@ -64,6 +64,7 @@ APK="$PROJ/v6only.apk"
 "${ADB[@]}" install --no-incremental -r "$APK"
 "${ADB[@]}" install --no-incremental -r "$OUT/tests.apk"
 if [[ ${V6ONLY_TEST_SUITE:-network} == cellular ]]; then
+  "${ADB[@]}" emu gsm data home
   "${ADB[@]}" shell svc wifi disable
   "${ADB[@]}" shell svc data enable
   "${ADB[@]}" shell appops set edu.buaa.v6only ACTIVATE_VPN deny

@@ -32,7 +32,9 @@ public final class CellularSmoke extends Instrumentation {
             cm = context.getSystemService(ConnectivityManager.class);
             prefs = context.getSharedPreferences("v6only", Context.MODE_PRIVATE);
             prefs.edit().putBoolean("enabled", false).putBoolean("auto", true).commit();
-            await(this::cellularDefault, "real cellular default network");
+            // Fresh CI emulators may still be registering the modem. This wait is
+            // before starting the app; service behavior keeps the shorter timeout.
+            await(this::cellularDefault, "real cellular default network", 60000);
             checkConnectivity();
             activity = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             runOnMainSync(() -> activity.findViewById(R.id.toggle_service).performClick());
@@ -86,7 +88,10 @@ public final class CellularSmoke extends Instrumentation {
     }
     private void command(String action) { runOnMainSync(() -> context.startForegroundService(new Intent(context,V6VpnService.class).setAction(action))); }
     private void await(BooleanSupplier condition, String name) {
-        long end=SystemClock.elapsedRealtime()+12000;
+        await(condition, name, 12000);
+    }
+    private void await(BooleanSupplier condition, String name, long timeout) {
+        long end=SystemClock.elapsedRealtime()+timeout;
         while(SystemClock.elapsedRealtime()<end) { if(condition.getAsBoolean())return; SystemClock.sleep(100); }
         throw new AssertionError("Timeout: "+name);
     }

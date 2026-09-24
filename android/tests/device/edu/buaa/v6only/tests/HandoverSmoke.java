@@ -30,15 +30,18 @@ public final class HandoverSmoke extends Instrumentation {
             prefs.edit().putBoolean("enabled",false).commit();
             runOnMainSync(() -> context.startForegroundService(new Intent(context,V6VpnService.class).setAction(V6VpnService.ACTION_STOP)));
             SystemClock.sleep(300);
-            Activity activity=startActivitySync(new Intent(context,edu.buaa.v6only.MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            // MainActivity.onResume applies the production service. That would run
+            // a second controller beside the test-only campus service in this APK.
+            Activity activity=startActivitySync(new Intent().setClassName(context.getPackageName(),
+                    "edu.buaa.v6only.HandoverActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             shell("svc data enable");
             for(boolean automatic:new boolean[]{true,false}) {
                 shell("svc wifi enable");await(()->transport(NetworkCapabilities.TRANSPORT_WIFI),"Wi-Fi default");
                 prefs.edit().putBoolean("enabled",false).putBoolean("auto",automatic).commit();
                 command(V6VpnService.ACTION_START);
                 await(()->V6VpnServiceExt.running(context)&&transport(NetworkCapabilities.TRANSPORT_VPN),"campus VPN established");
-                checkHttp();
                 Network before = stableTunnel();
+                checkHttp();
                 command(V6VpnService.ACTION_APPLY);
                 SystemClock.sleep(500);
                 check(before.equals(cm.getActiveNetwork()), "reapply must preserve healthy tunnel");

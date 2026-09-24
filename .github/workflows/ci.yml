@@ -180,7 +180,7 @@ jobs:
         run: |
           source android/sdk-env.sh
           "$BT/aapt2" dump xmltree android/v6only.apk --file AndroidManifest.xml > /tmp/manifest.txt
-          if grep -Eq 'FixtureVpn|HandoverVpn|OtherVpn' /tmp/manifest.txt; then exit 1; fi
+          if grep -Eq 'FixtureVpn|HandoverVpn|HandoverActivity|OtherVpn' /tmp/manifest.txt; then exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
           name: v6only-apk
@@ -210,11 +210,8 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: |
-            export V6ONLY_ANDROID_ABIS=x86_64
-            export ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-35/android.jar"
-            export ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-            for suite in cellular other-vpn handover network; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done
+          # The action runs each script line in its own shell; keep exports together.
+          script: export V6ONLY_ANDROID_ABIS=x86_64 ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-35/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"; for suite in cellular other-vpn handover network; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done
       - uses: actions/upload-artifact@v4
         if: always()
         with:

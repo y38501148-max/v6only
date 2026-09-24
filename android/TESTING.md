@@ -23,13 +23,15 @@ ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a V6ONLY_TEST_SUITE=han
 
 `HandoverSmoke` uses real Wi-Fi/cellular transport switching. The fixture-only `HandoverVpn` labels emulator Wi-Fi as campus; all selection callbacks, authorization, establishment and teardown use the production service. Automatic/manual modes must remove VPN routes and synthetic DNS on mobile and preserve unbound HTTP connectivity. Reapplying settings while connected must preserve the existing tunnel. The host Mac network is never changed. The CI emulator matrix exercises Android 10 / 15 in isolated Linux VMs.
 
+The handover fixture uses an inert foreground activity so `MainActivity.onResume` cannot start a second controller beside the fixture service. Cellular startup still exercises the real UI. Fresh emulator modem registration is a precondition checked before starting the app, separately from the shorter service assertions. Handover HTTP recovery is bounded and its latency is printed; sustained failures retain connectivity, route and logcat diagnostics.
+
 ## Real native tunnel integration
 
 ```sh
 ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a V6ONLY_TEST_SUITE=tunnel bash android/device-test.sh
 ```
 
-This creates `v6only-fixture.apk`, using the same production `establishTunnel`, `closeTun`, JNI and physical-socket protection implementation. A test-only service supplies the emulator network and controlled DNS in place of campus discovery. Both fixture services and their manifest entries are absent from production builds and cannot be signed using the release-key build option. CI inspects the production manifest for leakage.
+This creates `v6only-fixture.apk`, using the same production `establishTunnel`, `closeTun`, JNI and physical-socket protection implementation. A test-only service supplies the emulator network and controlled DNS in place of campus discovery. Fixture services, activity and manifest entries are absent from production builds and cannot be signed using the release-key build option. CI inspects the production manifest for leakage.
 
 Loopback fixture servers on the host provide controlled IPv4/IPv6 endpoints and DNS at port 15353. The emulator accesses them via 10.0.2.2 and fec0::2. Tests exercise real Android VPN routes, A queries over TCP/UDP, IPv4-entry flows upgraded to IPv6, IPv4-only origins, explicit IPv6 failure with IPv4 fallback, native diagnostics, and physical connectivity after stop. No host route, DNS or firewall settings are modified.
 
