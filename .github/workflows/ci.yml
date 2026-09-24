@@ -45,8 +45,10 @@ jobs:
               -Action Block -Protocol UDP -RemotePort 53 -RemoteAddress $blocked | Out-Null
             $rule = Get-NetFirewallRule -DisplayName 'ci-test-dns-block'
             if ($rule.Enabled -ne 'True') { throw "rule not enabled" }
-            $addr = Get-NetFirewallAddressFilter -AssociatedAppId $rule[0].Name -ErrorAction SilentlyContinue
-            Write-Host "✓ 防火墙规则创建/查询成功"
+            # 等价校验：v6only 实际只用 Enabled/Direction/Action，地址过滤单独查
+            $addr = ($rule | Get-NetFirewallAddressFilter)
+            if ($addr.RemoteAddress.Count -lt 1) { throw "remote address filter missing" }
+            Write-Host "✓ 防火墙规则创建/查询成功 (RemoteAddress=$($addr.RemoteAddress -join ','))"
           } finally {
             Get-NetFirewallRule -DisplayName 'ci-test-dns-block' -ErrorAction SilentlyContinue |
               Remove-NetFirewallRule
