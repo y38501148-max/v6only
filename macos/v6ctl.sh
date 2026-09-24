@@ -109,6 +109,10 @@ apply_failed() {
 
 on() {
     local addresses result token resolver_tmp
+    if ! campus; then
+        if [[ -d "$ORIGINAL" ]]; then off auto; fi
+        die '当前未识别到校园网，未开启配置。'; return 1
+    fi
     if configuration_active; then
         rm -f "$SUSPEND"
         printf '配置已生效，无需重复应用。\n'

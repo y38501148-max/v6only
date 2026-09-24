@@ -104,6 +104,12 @@ mv "$STAGE" "$LIB"
 # A legacy active marker is not a snapshot of the previous network settings.
 if [[ ! -d "$ORIGINAL" ]]; then rm -f "$MARKER"; fi
 if campus && ! suspended; then /bin/bash "$LIB/v6ctl.sh" on; fi
+# The old tool itself wrote this exact list and reset to DHCP on exit. Do not
+# retain its campus settings as a supposed user preference on ordinary Wi-Fi.
+if [[ "$MODE" == --migrate-legacy && -f "$ORIGINAL/dns" ]] &&
+    [[ "$(cat "$ORIGINAL/dns")" == $'2400:3200::1\n240c::6666\n202.112.128.50' ]]; then
+    printf 'Empty\n' > "$ORIGINAL/dns"
+fi
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

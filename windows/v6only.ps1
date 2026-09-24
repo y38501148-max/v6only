@@ -4,14 +4,14 @@
     v6only for Windows — 校园网感知 v6 优先守护 (v2)
 .DESCRIPTION
     与 macOS 端同构：
-      - 双栈站点走 IPv6（DNS 稳回 AAAA + 系统前缀策略偏好 v6）
+      - 仅校园网生效；保留系统 IPv4/IPv6 地址选择，不强制使用 IPv6
       - v4-only 站点直连 IPv4，不受影响
       - 封外部 IPv4 明文 DNS（防硬编码 8.8.8.8 绕过解析策略）
       - 校园 DNS（202.112.128.0/24、10/8 网关型）放行
     检测信号（任一命中即校园网）：
-      - 默认网关 ∈ 10/8
-      - DNS 后缀含 buaa.edu.cn
-      - SSID 以 BUAA 开头（WLAN API，无需定位权限）
+      - 物理接口的 DHCP DNS 精确匹配校园 DNS
+      - DHCP 域名边界匹配 buaa.edu.cn
+      - 当前物理网络配置文件名匹配校园 SSID
     计划任务开机自启；-Suspend 30 分钟不干预（对应用户手动回滚）
 .NOTES
     需要管理员权限。适用：Windows 10 1903+ / Windows 11
@@ -32,8 +32,9 @@ $ErrorActionPreference = 'Stop'
 $Marker     = "$env:ProgramData\v6only\active.flag"
 $SuspendFlg = "$env:ProgramData\v6only\suspend.flag"
 $LogFile    = "$env:ProgramData\v6only\v6only.log"
-$DnsV6Primary = '2400:3200::1'        # AliDNS v6 (CERNET2 直连 9ms)
-$DnsV6Backup  = '240c::6666'          # CNGI v6
+$DnsV6Primary = '2400:3200::1'        # Public fallback; DNS transport does not force IPv6
+$Snapshot = "$env:ProgramData\v6only\original.json"
+$ManagedDns = @('202.112.128.50','202.112.128.51','2400:3200::1')
 $DnsCampusV4  = '202.112.128.50'      # 校园 v4 兜底（v4-only 域名查 A）
 $BlockedDnsV4 = @('8.8.8.8','8.8.4.4','1.1.1.1','9.9.9.9')  # 外部 v4 明文 DNS 封堵名单
 
@@ -42,84 +43,160 @@ function Write-Log([string]$msg) {
     "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg" | Out-File $LogFile -Append -Encoding utf8
 }
 
-function Test-CampusNetwork {
-    # 信号1: 默认网关 ∈ 10/8
-    $gw = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
-           Sort-Object RouteMetric | Select-Object -First 1).NextHop
-    if ($gw -and $gw.StartsWith('10.')) { return $true, "gateway=$gw" }
-    # 信号2: DNS 后缀
-    $suffix = (Get-DnsClientGlobalSetting).SuffixSearchList -join ','
-    if ($suffix -match 'buaa\.edu\.cn') { return $true, "suffix=$suffix" }
-    # 信号3: SSID
-    try {
-        $wlan = (netsh wlan show interfaces | Select-String '^\s*SSID').ToString()
-        $ssid = ($wlan -split ':',2)[1].Trim()
-        if ($ssid -and $ssid -match '^BUAA') { return $true, "ssid=$ssid" }
-    } catch {}
-    return $false, ''
+function Get-ActiveAdapter {
+    $routes = @(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue)
+    if (-not $routes) { $routes = @(Get-NetRoute -DestinationPrefix '::/0' -ErrorAction SilentlyContinue) }
+    foreach ($route in ($routes | Sort-Object { $_.RouteMetric + $_.InterfaceMetric })) {
+        $adapter = Get-NetAdapter | Where-Object {
+            $_.ifIndex -eq $route.InterfaceIndex -and $_.Status -eq 'Up' -and $_.HardwareInterface
+        } | Select-Object -First 1
+        if ($adapter) { return $adapter }
+    }
+    return $null
+}
+
+function Test-CampusEvidence([string]$DhcpDns, [string]$Domain, [string]$Profile) {
+    foreach ($ip in ($DhcpDns -split '[,;\s]+')) {
+        if ($ip -in @('202.112.128.50','202.112.128.51')) { return $true }
+    }
+    foreach ($suffix in ($Domain -split '[,;\s]+')) {
+        if ($suffix.TrimEnd('.') -match '(^|\.)buaa\.edu\.cn$') { return $true }
+    }
+    return $Profile -match '^BUAA($|[-_])'
+}
+
+function Test-CampusNetwork($Adapter = (Get-ActiveAdapter)) {
+    if (-not $Adapter) { return $false, '' }
+    $guid = ([guid]$Adapter.InterfaceGuid).ToString('B')
+    # Read DHCP evidence, not the static DNS values written by this program.
+    $lease = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$guid" -ErrorAction SilentlyContinue
+    $profile = (Get-NetConnectionProfile -InterfaceIndex $Adapter.ifIndex -ErrorAction SilentlyContinue |
+        Select-Object -First 1).Name
+    $matched = Test-CampusEvidence $lease.DhcpNameServer $lease.DhcpDomain $profile
+    return $matched, "interface=$($Adapter.Name)"
+}
+
+function Get-AdapterDns($Adapter) {
+    return @((Get-DnsClientServerAddress -InterfaceIndex $Adapter.ifIndex -ErrorAction Stop).ServerAddresses |
+        Where-Object { $_ } | Select-Object -Unique)
 }
 
 function Invoke-V6On {
-    $adapter = Get-NetAdapter | Where-Object Status -eq 'Up' |
-               Sort-Object LinkSpeed -Descending | Select-Object -First 1
-    if (-not $adapter) { Write-Log 'no active adapter'; return }
-    $v6addr = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv6 -ErrorAction SilentlyContinue |
-              Where-Object IPAddress -like '2001:*' | Select-Object -First 1
-    if (-not $v6addr) { Write-Log "no global IPv6 on $($adapter.Name), abort"; return }
-    Write-Log "v6 addr = $($v6addr.IPAddress) on $($adapter.Name)"
-
-    # DNS: v6 优先 + 校园 v4 兜底
-    Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex `
-        -ServerAddresses $DnsV6Primary, $DnsV6Backup, $DnsCampusV4
-    Clear-DnsClientCache
-
-    # 封外部 v4 明文 DNS：出站 53/udp+tcp 到黑名单 IP
-    $fwRule = Get-NetFirewallRule -DisplayName 'v6only-block-external-dns' -ErrorAction SilentlyContinue
-    if (-not $fwRule) {
-        New-NetFirewallRule -DisplayName 'v6only-block-external-dns' `
-            -Direction Outbound -Action Block -Protocol UDP -RemotePort 53 `
-            -RemoteAddress $BlockedDnsV4 -Profile Any | Out-Null
-        New-NetFirewallRule -DisplayName 'v6only-block-external-dns-tcp' `
-            -Direction Outbound -Action Block -Protocol TCP -RemotePort 53 `
-            -RemoteAddress $BlockedDnsV4 -Profile Any | Out-Null
+    $adapter = Get-ActiveAdapter
+    $campus, $why = Test-CampusNetwork $adapter
+    if (-not $campus) {
+        if ((Test-Path $Marker) -or (Test-Path $Snapshot)) { Invoke-V6Off -Automatic }
+        Write-Log 'outside campus: no configuration applied'
+        return
     }
-    New-Item -ItemType File -Force -Path $Marker | Out-Null
-    Remove-Item $SuspendFlg -Force -ErrorAction SilentlyContinue
-    Write-Log 'v6-prefer ON'
-    if (-not $Watch) { Write-Host "✅ v6 优先模式已开启（双栈站走 v6，v4-only 站直连 v4）" }
+    $v6addr = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv6 -ErrorAction SilentlyContinue |
+        Where-Object IPAddress -match '^[23][0-9a-fA-F]{3}:' | Select-Object -First 1
+    if (-not $v6addr) { Write-Log "no global IPv6 on $($adapter.Name)"; return }
+    $state = if (Test-Path $Snapshot) { Get-Content $Snapshot -Raw | ConvertFrom-Json } else { $null }
+    if ($state -and $state.InterfaceGuid -ne [string]$adapter.InterfaceGuid) {
+        Invoke-V6Off -Automatic
+        $state = $null
+    }
+    $current = @(Get-AdapterDns $adapter)
+    $udp = Get-NetFirewallRule -DisplayName 'v6only-block-external-dns' -ErrorAction SilentlyContinue
+    $tcp = Get-NetFirewallRule -DisplayName 'v6only-block-external-dns-tcp' -ErrorAction SilentlyContinue
+    if ($state -and ($current -join ',') -eq ($ManagedDns -join ',') -and
+        $udp.Enabled -eq 'True' -and $tcp.Enabled -eq 'True' -and (Test-Path $Marker)) {
+        Remove-Item $SuspendFlg -Force -ErrorAction SilentlyContinue
+        return
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path $Marker) | Out-Null
+    if (-not $state) {
+        $guid = ([guid]$adapter.InterfaceGuid).ToString('B')
+        $registry = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\$guid" -ErrorAction SilentlyContinue
+        $registry6 = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters\Interfaces\$guid" -ErrorAction SilentlyContinue
+        $state = [pscustomobject]@{
+            InterfaceGuid = [string]$adapter.InterfaceGuid
+            AutomaticDns = ([string]::IsNullOrWhiteSpace($registry.NameServer) -and [string]::IsNullOrWhiteSpace($registry6.NameServer))
+            OriginalDns = $current
+            AppliedDns = $ManagedDns
+        }
+        $state | ConvertTo-Json | Set-Content $Snapshot -Encoding UTF8
+    }
+    $state | Add-Member -NotePropertyName PreviousAppliedDns -NotePropertyValue @($state.AppliedDns) -Force
+    $state.AppliedDns = $ManagedDns
+    $state | ConvertTo-Json | Set-Content $Snapshot -Encoding UTF8
+    try {
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $ManagedDns
+        foreach ($protocol in @('UDP','TCP')) {
+            $name = if ($protocol -eq 'UDP') { 'v6only-block-external-dns' } else { 'v6only-block-external-dns-tcp' }
+            Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+            New-NetFirewallRule -DisplayName $name -Direction Outbound -Action Block `
+                -Protocol $protocol -RemotePort 53 -RemoteAddress $BlockedDnsV4 `
+                -InterfaceAlias $adapter.Name -Profile Any | Out-Null
+        }
+        if ((@(Get-AdapterDns $adapter) -join ',') -ne ($ManagedDns -join ',')) { throw 'DNS readback mismatch' }
+        New-Item -ItemType File -Force -Path $Marker | Out-Null
+        Remove-Item $SuspendFlg -Force -ErrorAction SilentlyContinue
+        Write-Log "campus configuration applied ($why)"
+    } catch {
+        Invoke-V6Off -Automatic
+        throw
+    }
+    if (-not $Watch) { Write-Host '已应用校园双栈配置；IPv4/IPv6 由系统及应用选择。' }
 }
 
-function Invoke-V6Off {
-    $adapter = Get-NetAdapter | Where-Object Status -eq 'Up' |
-               Sort-Object LinkSpeed -Descending | Select-Object -First 1
-    if ($adapter) { Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses }
-    Get-NetFirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue |
-        Remove-NetFirewallRule
-    Remove-Item $Marker -Force -ErrorAction SilentlyContinue
-    # 挂起守护，防止被拉回
-    $minutes = if ($Suspend) { [int]$Suspend } else { 30 }
-    New-Item -ItemType File -Force -Path $SuspendFlg | Out-Null
-    (Get-Date).AddMinutes($minutes).ToString('o') | Out-File $SuspendFlg -Encoding utf8
-    Clear-DnsClientCache
-    Write-Log "v6-prefer OFF, daemon suspended ${minutes}min"
-    if (-not $Watch) { Write-Host "✅ 已回滚，守护挂起 ${minutes} 分钟" }
+function Invoke-V6Off([switch]$Automatic) {
+    if (Test-Path $Snapshot) {
+        $state = Get-Content $Snapshot -Raw | ConvertFrom-Json
+        $adapter = Get-NetAdapter | Where-Object { [string]$_.InterfaceGuid -eq $state.InterfaceGuid } | Select-Object -First 1
+        if (-not $adapter) { throw 'Original interface is unavailable; keeping snapshot for restoration.' }
+        $current = @(Get-AdapterDns $adapter) -join ','
+        if ($current -eq ($state.AppliedDns -join ',') -or $current -eq ($state.PreviousAppliedDns -join ',')) {
+            if ($state.AutomaticDns) { Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses }
+            else { Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses @($state.OriginalDns) }
+        }
+    } elseif (Test-Path $Marker) {
+        # Legacy releases did not save a snapshot. Reset only their exact DNS profile.
+        foreach ($adapter in (Get-NetAdapter)) {
+            $dns = @(Get-AdapterDns $adapter)
+            if ((($dns | Sort-Object) -join ',') -eq '202.112.128.50,2400:3200::1,240c::6666') {
+                Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses
+            }
+        }
+    }
+    Get-NetFirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    Remove-Item $Marker,$Snapshot -Force -ErrorAction SilentlyContinue
+    if (-not $Automatic) {
+        $minutes = if ($Suspend) { [int]$Suspend } else { 30 }
+        New-Item -ItemType Directory -Force -Path (Split-Path $SuspendFlg) | Out-Null
+        (Get-Date).AddMinutes($minutes).ToString('o') | Set-Content $SuspendFlg -Encoding UTF8
+    }
+    Write-Log 'campus configuration removed'
 }
 
-function Test-Expired([string]$path) {
+function Test-Suspended([string]$path) {
     if (-not (Test-Path $path)) { return $false }
     $until = Get-Content $path -Raw
-    try { if ((Get-Date) -gt (Get-Date $until.Trim())) { Remove-Item $path -Force; return $false } } catch {}
+    try {
+        if ((Get-Date) -ge [datetime]::Parse($until.Trim())) {
+            Remove-Item $path -Force
+            return $false
+        }
+    } catch { return $true }
     return $true
 }
 
 function Invoke-Test {
-    $fail = 0
-    function Ok($m){ Write-Host "  [PASS] $m" }
+    $script:fail = 0
+    $script:passed = 0
+    function Ok($m){ Write-Host "  [PASS] $m"; $script:passed++ }
     function Bad($m){ Write-Host "  [FAIL] $m"; $script:fail++ }
 
     Write-Host "=== v6only Windows 验证 ==="
+    $campus, $reason = Test-CampusNetwork
+    if (-not $campus) {
+        if ((Test-Path $Marker) -or (Test-Path $Snapshot)) { Bad '非校园网仍有待回滚状态' }
+        else { Ok '非校园网，校园配置未生效' }
+        exit $script:fail
+    }
     $v6 = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue |
-          Where-Object IPAddress -like '2001:*' | Select-Object -First 1
+          Where-Object IPAddress -match '^[23][0-9a-fA-F]{3}:' | Select-Object -First 1
     if ($v6) { Ok "全球 v6 = $($v6.IPAddress)" } else { Bad "无 2001:: v6 地址" }
 
     $dns = (Get-DnsClientServerAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue |
@@ -127,9 +204,9 @@ function Invoke-Test {
     if ($dns -contains $DnsV6Primary) { Ok "DNS 上游含 v6 ($DnsV6Primary)" } else { Bad "DNS 未配置 v6 上游: $dns" }
 
     try {
-        $r = Resolve-DnsName www.edu.cn -Type AAAA -Server $DnsV6Primary -DnsOnly -ErrorAction Stop
-        Ok "v6 上游解析 AAAA = $($r[0].IPAddress)"
-    } catch { Bad "v6 上游解析失败（链路抖动？）" }
+        $r = Resolve-DnsName www.edu.cn -Type AAAA -Server $DnsCampusV4 -DnsOnly -ErrorAction Stop
+        Ok "校园 DNS 解析 AAAA = $($r[0].IPAddress)"
+    } catch { Bad '校园 DNS 的 AAAA 解析失败' }
 
     try {
         $r = Resolve-DnsName mirrors.ustc.edu.cn -Type A -Server $DnsCampusV4 -DnsOnly -ErrorAction Stop
@@ -140,15 +217,14 @@ function Invoke-Test {
     try { Resolve-DnsName www.baidu.com -Server 8.8.8.8 -DnsOnly -QuickTimeout -ErrorAction Stop | Out-Null; $blocked = $false } catch {}
     if ($blocked) { Ok "外部 v4 DNS (8.8.8.8) 已封" } else { Bad "8.8.8.8 仍可查询" }
 
-    $t = Test-NetConnection codexapis.com -Port 443 -ConstrainSourceAddress -ConstrainInterface 0 -InformationLevel Quiet -ErrorAction SilentlyContinue
     $conn = Test-NetConnection codeforces.com -Port 443 -InformationLevel Quiet -WarningAction SilentlyContinue
     if ($conn) { Ok "codeforces.com:443 可达" } else { Bad "codeforces.com 不可达" }
     $k = Test-NetConnection kedaya.ai -Port 443 -InformationLevel Quiet -WarningAction SilentlyContinue
     if ($k) { Ok "kedaya.ai:443 可达" } else { Bad "kedaya.ai 不可达" }
 
     if (Test-Path $Marker) { Ok "v6 优先模式标记存在" } else { Bad "无 active 标记" }
-    Write-Host "=== 结果：通过 $((12 - $fail)) 项 / 失败 $fail 项 ==="
-    exit $fail
+    Write-Host "=== 结果：通过 $script:passed 项 / 失败 $script:fail 项 ==="
+    exit $script:fail
 }
 
 # ── 主入口 ──
@@ -157,16 +233,22 @@ switch ($true) {
     $On        { Invoke-V6On }
     $Off       { Invoke-V6Off }
     $Install {
+        $installDir = Split-Path $Marker
+        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+        $installedScript = Join-Path $installDir 'v6only.ps1'
+        if ($PSCommandPath -ne $installedScript) { Copy-Item -LiteralPath $PSCommandPath -Destination $installedScript -Force }
+        & icacls $installDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot secure the SYSTEM task installation directory.' }
         # 计划任务：开机 + 每 5 分钟自愈（错过的开机触发由循环触发补上）
         $action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
-                     -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Watch"
+                     -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$installedScript`" -Watch"
         $trigger = @(
             New-ScheduledTaskTrigger -AtLogon
             New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
         )
         $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -RunLevel Highest
         $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-                         -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+                         -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
         Register-ScheduledTask -TaskName 'v6only-watch' -Action $action -Trigger $trigger `
             -Principal $principal -Settings $settings -Force | Out-Null
         Write-Host "✅ 计划任务 v6only-watch 已注册（开机自启 + 5 分钟自愈）"
@@ -175,7 +257,7 @@ switch ($true) {
         Unregister-ScheduledTask -TaskName 'v6only-watch' -Confirm:$false -ErrorAction SilentlyContinue
         Get-NetFirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue |
             Remove-NetFirewallRule
-        Invoke-V6Off
+        Invoke-V6Off -Automatic
         Remove-Item "$env:ProgramData\v6only" -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "✅ v6only 已卸载并还原网络"
     }
@@ -183,18 +265,18 @@ switch ($true) {
         # 守护主循环（SYSTEM 计划任务运行）
         Write-Log "v6-watch started (pid=$PID)"
         while ($true) {
-            if (-not (Test-Expired $SuspendFlg) -and (Test-Path $SuspendFlg)) {
-                Start-Sleep 20; continue
+            try {
+                $campus, $why = Test-CampusNetwork
+                if (-not $campus -and ((Test-Path $Marker) -or (Test-Path $Snapshot))) {
+                    Invoke-V6Off -Automatic
+                } elseif ($campus -and -not (Test-Suspended $SuspendFlg)) {
+                    Invoke-V6On
+                }
+                Start-Sleep -Seconds 20
+            } catch {
+                Write-Log "configuration failed: $_"
+                Start-Sleep -Seconds 300
             }
-            $campus, $why = Test-CampusNetwork
-            if ($campus -and -not (Test-Path $Marker)) {
-                Write-Log "campus detected ($why) -> ON"
-                Invoke-V6On
-            } elseif (-not $campus -and (Test-Path $Marker)) {
-                Write-Log "left campus -> OFF"
-                Invoke-V6Off
-            }
-            Start-Sleep -Seconds 20
         }
     }
     default {

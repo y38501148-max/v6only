@@ -2,20 +2,22 @@ package edu.buaa.v6only;
 
 import android.content.Context;
 
-/**
- * VPN 运行状态的全局标志。
- * getRunningServices() 在 API 26+ 已不保证返回结果，用它判定会导致
- * 「点停止被误判为未运行 → 反而再次启动」。改由 V6VpnService 在
- * onCreate/onDestroy 维护静态标志。
- */
+/** Process-local observed state; persisted user intent lives in SharedPreferences. */
 public final class V6VpnServiceExt {
-    private static volatile boolean sRunning = false;
+    private static volatile boolean running;
+    private static volatile boolean monitoring;
+    private static volatile boolean campus;
+    private static volatile String reason = "";
+    private static volatile String message = "服务已停止";
 
-    public static boolean running(Context ctx) {
-        return sRunning;
-    }
-
-    public static void setRunning(boolean r) {
-        sRunning = r;
-    }
+    private V6VpnServiceExt() {}
+    public static boolean running(Context context) { return running; }
+    public static boolean monitoring() { return monitoring; }
+    public static boolean campus() { return campus; }
+    public static String reason() { return reason; }
+    public static String message() { return message; }
+    static void setRunning(boolean value) { running = value; }
+    static void setMonitoring(boolean value) { monitoring = value; }
+    static void setCampus(boolean value, String detail) { campus = value; reason = detail; }
+    static void setMessage(String value) { message = value; }
 }

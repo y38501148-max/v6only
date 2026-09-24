@@ -1,135 +1,185 @@
 package edu.buaa.v6only;
 
+import android.Manifest;
 import android.content.Context;
-import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
-import android.net.VpnService;
+import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
-import java.net.Inet4Address;
+import android.os.Build;
+import android.os.Handler;
 import java.net.InetAddress;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-/**
- * 校园网检测器（与 macOS 侧 v6-watch.sh 同构，多信号任一命中即认定）：
- *  1. DNS 服务器 ∈ 校园段（202.112.128.0/24 等）
- *  2. 本机/网关 IPv4 ∈ 10/8（校园大二层；模拟器网关 10.0.2.2 亦命中，便于测试）
- *  3. DHCP 域名含 buaa.edu.cn
- *  4. SSID 以 BUAA 开头（需定位权限，尽力而为）
- *
- * 注意：不过滤 NET_CAPABILITY_INTERNET —— Portal 未认证的校园网恰好没有
- * 该 capability，若按它过滤会出现「连着校园网却显示未接入」的误报。
- */
-public final class CampusWatcher {
+/** Owned by the foreground service; callbacks never start/stop Android services. */
+final class CampusWatcher {
+    interface Listener { void onNetworkChanged(State state); }
 
-    private static final AtomicBoolean REGISTERED = new AtomicBoolean(false);
-    private static ConnectivityManager cm;
-    private static ConnectivityManager.NetworkCallback cb;
-    private static volatile boolean lastCampus = false;
-    private static volatile String lastReason = "";
-    private static Context appCtx;
+    static final class State {
+        final Network network;
+        final LinkProperties links;
+        final NetworkCapabilities capabilities;
+        final String campusReason;
 
-    /** 单网络判定：返回命中的信号名，未命中返回 null */
-    private static String matchNetwork(ConnectivityManager c, Network n) {
-        LinkProperties lp = c.getLinkProperties(n);
-        NetworkCapabilities caps = c.getNetworkCapabilities(n);
-        if (lp == null) return null;
+        State(Network network, LinkProperties links, NetworkCapabilities capabilities,
+              String campusReason) {
+            this.network = network;
+            this.links = links;
+            this.capabilities = capabilities;
+            this.campusReason = campusReason;
+        }
+        boolean isCampus() { return !campusReason.isEmpty(); }
+    }
 
-        // 信号1：DNS 服务器地址
-        List<InetAddress> dns = lp.getDnsServers();
-        if (dns != null) {
-            for (InetAddress d : dns) {
-                if (d instanceof Inet4Address && isCampusDns(d.getAddress())) return "dns";
+    private static final class Entry {
+        LinkProperties links;
+        NetworkCapabilities capabilities;
+        boolean campusSsid;
+    }
+
+    private final Context context;
+    private final ConnectivityManager cm;
+    private final Handler handler;
+    private final Listener listener;
+    private final Map<Network, Entry> networks = new LinkedHashMap<>();
+    private final Runnable evaluate = this::evaluate;
+    private ConnectivityManager.NetworkCallback callback;
+
+    CampusWatcher(Context context, Handler handler, Listener listener) {
+        this.context = context;
+        this.cm = context.getSystemService(ConnectivityManager.class);
+        this.handler = handler;
+        this.listener = listener;
+    }
+
+    void start() {
+        if (callback != null) return;
+        int flags = Build.VERSION.SDK_INT >= 31
+                && context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                    == PackageManager.PERMISSION_GRANTED
+                ? ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO : 0;
+        callback = Build.VERSION.SDK_INT >= 31 ? new Callback(flags) : new Callback();
+        // Do not require INTERNET or VALIDATED: captive portals must still be observed.
+        cm.registerNetworkCallback(new NetworkRequest.Builder().clearCapabilities()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(),
+                callback, handler);
+        // Initial snapshot, outside a callback. Future updates use callback arguments, not
+        // synchronous getLinkProperties/getNetworkCapabilities calls with stale state.
+        for (Network network : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            if (isPhysical(caps)) {
+                Entry entry = new Entry();
+                entry.capabilities = caps;
+                entry.links = cm.getLinkProperties(network);
+                networks.put(network, entry);
             }
         }
-        // 信号2：本机 IPv4 ∈ 10/8
-        for (android.net.LinkAddress la : lp.getLinkAddresses()) {
-            InetAddress a = la.getAddress();
-            if (a instanceof Inet4Address && (a.getAddress()[0] & 0xFF) == 10) return "subnet";
-        }
-        // 信号3：DHCP 域名
-        String dom = lp.getDomains();
-        if (dom != null && dom.toLowerCase().contains("buaa.edu.cn")) return "domain";
+        refresh();
+    }
 
-        if (caps == null) return null;
-        // 信号4：SSID（有定位权限才拿得到，尽力而为）
+    private final class Callback extends ConnectivityManager.NetworkCallback {
+        Callback() { super(); }
+        Callback(int flags) { super(flags); }
+        @Override public void onAvailable(Network n) {
+            if (!networks.containsKey(n)) networks.put(n, new Entry());
+        }
+        @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities caps) {
+            if (!networks.containsKey(n)) networks.put(n, new Entry());
+            networks.get(n).capabilities = caps;
+            refresh();
+        }
+        @Override public void onLinkPropertiesChanged(Network n, LinkProperties links) {
+            if (!networks.containsKey(n)) networks.put(n, new Entry());
+            networks.get(n).links = links;
+            refresh();
+        }
+        @Override public void onLost(Network n) {
+            networks.remove(n);
+            refresh();
+        }
+    }
+
+    void refresh() {
+        handler.removeCallbacks(evaluate);
+        handler.postDelayed(evaluate, 100);
+    }
+
+    void stop() {
+        handler.removeCallbacks(evaluate);
+        if (callback != null) cm.unregisterNetworkCallback(callback);
+        callback = null;
+        networks.clear();
+    }
+
+    private static boolean isPhysical(NetworkCapabilities caps) {
+        return caps != null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN);
+    }
+
+    private void evaluate() {
+        Network best = null;
+        Entry selected = null;
+        int bestScore = -1;
+        // Executed after callback dispatch, not from inside the callback itself.
+        Network active = cm.getActiveNetwork();
+        for (Map.Entry<Network, Entry> item : networks.entrySet()) {
+            Entry entry = item.getValue();
+            if (entry.links == null || !isPhysical(entry.capabilities)) continue;
+            NetworkCapabilities caps = entry.capabilities;
+            int score = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? 100 : 0;
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) score += 200;
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) score += 30;
+            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) score += 20;
+            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) score += 10;
+            else continue;
+            if (item.getKey().equals(active)) score += 1000;
+            if (score > bestScore) {
+                bestScore = score;
+                best = item.getKey();
+                selected = entry;
+            }
+        }
+        listener.onNetworkChanged(selected == null ? new State(null, null, null, "")
+                : new State(best, selected.links, selected.capabilities, match(selected)));
+    }
+
+    private String match(Entry entry) {
+        NetworkCapabilities caps = entry.capabilities;
+        if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                && !caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return "";
+        for (InetAddress dns : entry.links.getDnsServers()) {
+            if (CampusPolicy.matchesDns(dns.getHostAddress())) return "校园 DNS";
+        }
+        if (CampusPolicy.matchesDomain(entry.links.getDomains())) return "校园域名";
         if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
             try {
-                WifiManager wm = (WifiManager) appCtx.getSystemService(Context.WIFI_SERVICE);
-                String ssid = wm != null ? wm.getConnectionInfo().getSSID() : null;
-                if (ssid != null && ssid.replace("\"", "").toUpperCase().startsWith("BUAA"))
-                    return "ssid";
-            } catch (Exception ignored) {}
-        }
-        return null;
-    }
-
-    private static boolean isCampusDns(byte[] a) {
-        int b0 = a[0] & 0xFF, b1 = a[1] & 0xFF;
-        return (b0 == 202 && b1 == 112)        // 202.112.128.50/51 校园 DNS
-                || (b0 == 10 && b1 == 0)       // 常见校内网关型 DNS
-                || (b0 == 10 && b1 == 135);    // 10.135.x 段
-    }
-
-    public static boolean isCampus(Context ctx) {
-        ConnectivityManager c =
-                (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (c == null) return false;
-        for (Network n : c.getAllNetworks()) {
-            String hit = matchNetwork(c, n);
-            if (hit != null) { lastReason = hit; return true; }
-        }
-        lastReason = "";
-        return false;
-    }
-
-    public static String lastReason() { return lastReason; }
-
-    public static synchronized void start(Context ctx) {
-        if (REGISTERED.get()) return;
-        appCtx = ctx.getApplicationContext();
-        cm = (ConnectivityManager) appCtx.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm == null) return;
-
-        cb = new ConnectivityManager.NetworkCallback() {
-            @Override public void onAvailable(Network network) { evaluate(); }
-            @Override public void onLost(Network network) { evaluate(); }
-            @Override public void onLinkPropertiesChanged(Network n, LinkProperties lp) { evaluate(); }
-        };
-        cm.registerNetworkCallback(
-                new NetworkRequest.Builder()
-                        .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                        .build(),
-                cb);
-        // callback 只覆盖带 INTERNET 的网络；再补一次全网络扫描（含 Portal 未认证网络）
-        REGISTERED.set(true);
-        evaluate();
-    }
-
-    public static synchronized void stop(Context ctx) {
-        if (!REGISTERED.get()) return;
-        try { cm.unregisterNetworkCallback(cb); } catch (Exception ignored) {}
-        REGISTERED.set(false);
-    }
-
-    private static void evaluate() {
-        boolean campus = isCampus(appCtx);
-        if (campus == lastCampus) return;
-        lastCampus = campus;
-        Intent i = new Intent(appCtx, V6VpnService.class)
-                .setAction(campus ? V6VpnService.ACTION_START : V6VpnService.ACTION_STOP);
-        try {
-            if (campus) {
-                if (VpnService.prepare(appCtx) == null) {
-                    appCtx.startForegroundService(i);
+                WifiInfo info = caps.getTransportInfo() instanceof WifiInfo
+                        ? (WifiInfo) caps.getTransportInfo() : null;
+                String ssid = info == null ? null : info.getSSID();
+                if (ssid == null || ssid.equals(WifiManager.UNKNOWN_SSID)) {
+                    WifiManager wifi = context.getSystemService(WifiManager.class);
+                    if (wifi != null) ssid = wifi.getConnectionInfo().getSSID();
                 }
-            } else {
-                appCtx.startService(i);
+                rememberSsid(entry, ssid);
+            } catch (SecurityException ignored) {
+                // DNS/domain detection is still available without location permission.
             }
-        } catch (Exception ignored) {}
+            if (entry.campusSsid) return "校园 Wi-Fi";
+        }
+        // 10/8 is also used by cellular, home routers and emulators. Never identify it
+        // as campus, and never inspect our own VPN DNS/search domain as campus evidence.
+        return "";
     }
+    private static void rememberSsid(Entry entry, String ssid) {
+        // Location redaction can change while the same network stays connected. Retain a
+        // confirmed SSID only for this Network; onLost discards it, a new SSID replaces it.
+        if (ssid != null && !ssid.equals(WifiManager.UNKNOWN_SSID) && !ssid.isEmpty())
+            entry.campusSsid = CampusPolicy.matchesSsid(ssid);
+    }
+
 }

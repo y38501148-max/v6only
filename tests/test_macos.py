@@ -168,6 +168,22 @@ class MacOSControllerTests(unittest.TestCase):
         s=self.read(); s['dhcp']='domain_name_server (ip_mult): {1.1.1.1, 202.112.128.50}'; self.save(s)
         self.script('campus',source='v6-common.sh')
 
+    def test_manual_on_outside_campus_does_not_change_network(self):
+        s=self.read(); s['dhcp']='router (ip_mult): {10.0.0.1}'; self.save(s)
+        self.on(ok=False)
+        self.assertEqual(self.read()['writes'],[])
+
+    def test_leaving_campus_restores_settings_and_reentry_applies(self):
+        self.on()
+        s=self.read(); s['dhcp']='router (ip_mult): {192.168.1.1}'; self.save(s)
+        self.on(ok=False)  # The manual entry also tears down an old campus session.
+        self.assertEqual(self.read()['dns'],self.initial['dns'])
+        self.assertEqual(self.read()['anchor'],'')
+        self.assertFalse((self.base/'run/v6only.active').exists())
+        self.assertFalse((self.base/'run/v6only.suspend').exists())
+        s=self.read(); s['dhcp']=self.initial['dhcp']; self.save(s)
+        self.on()
+
     def test_pause_expiry_and_legacy_empty_pause(self):
         pause=self.base/'run/v6only.suspend'
         pause.write_text('1\n'); self.script('suspended',source='v6-common.sh',ok=False)

@@ -6,3 +6,4 @@ out/
 android/build/
 __pycache__/
 *.pyc
+*.apk.idsig

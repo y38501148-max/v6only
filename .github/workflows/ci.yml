@@ -34,6 +34,10 @@ jobs:
           }
           Write-Host "✓ 关键函数齐全: $($names -join ', ')"
 
+      - name: 校园边界与设置回滚回归测试（模拟系统 API）
+        shell: pwsh
+        run: ./windows/test.ps1
+
       - name: 防火墙封堵逻辑等价性验证（真实 Windows 防火墙 API）
         shell: pwsh
         run: |
@@ -69,7 +73,11 @@ jobs:
       - name: DNS 配置 API 冒烟（真实 DnsClient 模块）
         shell: pwsh
         run: |
-          $if = Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 1
+          # Hosted runners can have an Up adapter with IPv6 disabled. Select a
+          # compatible adapter before exercising the IPv6 DNS API.
+          $if = Get-NetAdapter | Where-Object Status -eq 'Up' | Where-Object {
+            Get-DnsClientServerAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv6 -ErrorAction SilentlyContinue
+          } | Select-Object -First 1
           if ($if) {
             # 记录当前 → 设置测试值 → 校验 → 还原
             $before = Get-DnsClientServerAddress -InterfaceIndex $if.ifIndex -AddressFamily IPv6
@@ -79,7 +87,7 @@ jobs:
             Set-DnsClientServerAddress -InterfaceIndex $if.ifIndex -ResetServerAddresses
             Write-Host "✓ Set-DnsClientServerAddress 冒烟通过 ($($if.Name))"
           } else {
-            Write-Host "⚠ CI 无活动网卡，跳过（不影响逻辑验证）"
+            Write-Host "⚠ CI 无启用 IPv6 DNS 的活动网卡，跳过 IPv6 DNS API 冒烟（其余测试继续）"
           }
 
   macos-shellcheck:
@@ -112,31 +120,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
-      - name: 无 gradle 本地流水线构建 APK（与仓库 build-apk.sh 同构）
-        run: |
-          SDK="$ANDROID_HOME"
-          BT="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
-          PLATFORM="$SDK/platforms/android-34/android.jar"
-          [ -f "$PLATFORM" ] || PLATFORM="$(ls "$SDK"/platforms/*/android.jar | sort -V | tail -1)"
-          mkdir -p out/gen out/obj out/apk
-          "$BT/aapt2" compile --dir android/app/src/main/res -o out/res.zip
-          "$BT/aapt2" link -o out/apk/base.apk -I "$PLATFORM" \
-            --manifest android/app/src/main/AndroidManifest.xml \
-            --java out/gen --auto-add-overlay out/res.zip
-          find android/app/src/main/java out/gen -name '*.java' > out/srcs.txt
-          javac --release 17 -classpath "$PLATFORM" -d out/obj @out/srcs.txt
-          find out/obj -name '*.class' > out/cls.txt
-          "$BT/d8" --release --lib "$PLATFORM" --min-api 29 --output out/apk @out/cls.txt
-          (cd out/apk && zip -qj base.apk classes.dex)
-          "$BT/zipalign" -f 4 out/apk/base.apk out/apk/aligned.apk
-          keytool -genkeypair -keystore out/debug.keystore -storepass v6only -keypass v6only \
-            -alias v6only -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=v6only" >/dev/null 2>&1
-          "$BT/apksigner" sign --ks out/debug.keystore --ks-pass pass:v6only \
-            --out v6only.apk out/apk/aligned.apk
-          "$BT/apksigner" verify v6only.apk
-          echo "✓ APK 构建并验签通过"
+      - name: Build and verify Android APK
+        run: bash android/build-apk.sh
+      - name: Campus detection and mode regression tests
+        run: bash android/test.sh
       - uses: actions/upload-artifact@v4
         with:
           name: v6only-apk
-          path: v6only.apk
+          path: android/v6only.apk
