@@ -17,7 +17,7 @@ jobs:
         with: {node-version: '22', cache: npm, cache-dependency-path: desktop/package-lock.json}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: {workspaces: 'desktop/src-tauri -> target'}
+        with: {workspaces: 'desktop/src-tauri -> target', cache-on-failure: true}
       - name: Build desktop, service and MSI
         shell: pwsh
         run: ./scripts/build-desktop-windows.ps1

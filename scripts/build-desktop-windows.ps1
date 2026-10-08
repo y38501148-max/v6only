@@ -9,4 +9,9 @@ Push-Location "$project/core"
 try{go build -trimpath -ldflags='-s -w' -o "$project/windows/v6service.exe" ./cmd/v6service;if($LASTEXITCODE -ne 0){throw 'Service build failed'}}finally{Pop-Location}
 $env:V6ONLY_SERVICE_EXE="$project/windows/v6service.exe"
 Push-Location "$project/desktop"
-try{npm ci;if($LASTEXITCODE -ne 0){throw 'npm failed'};npm run tauri -- build --bundles msi;if($LASTEXITCODE -ne 0){throw 'Tauri MSI build failed'}}finally{Pop-Location}
+try{npm ci;if($LASTEXITCODE -ne 0){throw 'npm failed'};npm run tauri -- build --bundles msi --verbose
+ if($LASTEXITCODE -ne 0){
+  $candle=Join-Path $env:LOCALAPPDATA 'tauri/WixTools314/candle.exe'
+  if(Test-Path $candle){& $candle -arch x64 -out "$project/build/service-test.wixobj" "$project/desktop/src-tauri/wix/service.wxs"}
+  throw 'Tauri MSI build failed'
+ }}finally{Pop-Location}

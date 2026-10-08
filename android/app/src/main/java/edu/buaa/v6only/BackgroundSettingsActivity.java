@@ -1,6 +1,6 @@
 package edu.buaa.v6only;
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.widget.Toast;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.net.Uri;
@@ -26,9 +26,8 @@ public final class BackgroundSettingsActivity extends Activity {
                 intent.putExtra("package_name",getPackageName());intent.putExtra("packageName",getPackageName());
                 if(open(intent)) return;
             }
+            Toast.makeText(this,"请在应用设置中查找自启动或电池使用",Toast.LENGTH_LONG).show();
             open(details());
-            new AlertDialog.Builder(this).setTitle("应用设置").setMessage("当前系统未提供直接入口，请在应用设置中查找自启动或电池使用。")
-                .setPositiveButton("知道了",null).show();
         });
         Screen.button(this,page,"电池优化").setOnClickListener(v->{if(!open(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)))open(details());});
         Screen.button(this,page,"始终开启 VPN").setOnClickListener(v->{if(!open(new Intent(Settings.ACTION_VPN_SETTINGS)))open(details());});

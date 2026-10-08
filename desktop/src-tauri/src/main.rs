@@ -1,14 +1,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use std::{io::{BufRead,BufReader,Write},process::Command};
-#[cfg(unix)] use std::{os::unix::net::UnixStream,time::Duration};
+use std::io::{BufRead,BufReader,Write};
+#[cfg(unix)] use std::{os::unix::net::UnixStream,time::Duration,process::Command};
 use serde_json::{Value,json};
 use tauri::Manager;
+#[cfg(unix)]
 fn shell_quote(s:&str)->String {format!("'{}'",s.replace('\'',"'\\''"))}
 fn rpc(q:Value)->Result<Value,String>{
  #[cfg(unix)]
  let mut stream=UnixStream::connect("/var/run/v6only-desktop.sock").map_err(|_|"后台服务尚未安装，点击「安装并启用」完成配置。".to_string())?;
  #[cfg(windows)]
- let mut stream=std::fs::OpenOptions::new().read(true).write(true).open(r"\\.\pipe\v6only-desktop").map_err(|_|"后台服务尚未启动，请重新安装或启动 V6Only 服务。".to_string())?;
+ let mut stream={
+  let mut attempts=0;
+  loop {match std::fs::OpenOptions::new().read(true).write(true).open(r"\\.\pipe\v6only-desktop") {
+   Ok(stream)=>break stream,
+   Err(error) if error.raw_os_error()==Some(231) && attempts<30=>{attempts+=1;std::thread::sleep(std::time::Duration::from_millis(100));},
+   Err(_)=>return Err("后台服务尚未启动，请重新安装或启动 V6Only 服务。".to_string())
+  }}
+ };
  #[cfg(unix)]
  stream.set_read_timeout(Some(Duration::from_secs(90))).map_err(|e|e.to_string())?;
  #[cfg(unix)]

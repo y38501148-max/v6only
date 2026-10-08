@@ -53,8 +53,8 @@ core_active() {
 }
 validate_forwarding() {
     # Check complete DNS/TLS/TCP paths after route activation, not just /health.
-    local url attempt
-    for attempt in {1..12}; do
+    local url _attempt
+    for _attempt in {1..12}; do
         if curl --noproxy '*' -fsS --max-time 2 http://127.0.0.1:17890/health | grep -q '"data_path_verified":true'; then break; fi
         sleep 1
     done

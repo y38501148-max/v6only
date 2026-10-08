@@ -3,7 +3,6 @@ package v6core
 import (
 	"database/sql"
 	"fmt"
-	_ "modernc.org/sqlite"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -39,7 +38,7 @@ type TrafficStore struct {
 }
 
 func OpenTraffic(path string) (*TrafficStore, error) {
-	db, e := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)")
+	db, e := sql.Open(trafficDriver, trafficDSN(path, true))
 	if e != nil {
 		return nil, e
 	}
@@ -149,7 +148,7 @@ func (s *TrafficStore) Report(from, to int64) (TrafficReport, error) {
 	return ReadTrafficDB(s.db, from, to)
 }
 func ReadTraffic(path string, from, to int64) (TrafficReport, error) {
-	db, e := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(5000)")
+	db, e := sql.Open(trafficDriver, trafficDSN(path, false))
 	if e != nil {
 		return TrafficReport{}, e
 	}
