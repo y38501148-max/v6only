@@ -35,7 +35,11 @@ function Start-Core([string]$Dns, [bool]$Fake) {
         Start-Sleep -Milliseconds 250
     }
     if (-not (Test-Path $ready)) { throw 'Core readiness timeout' }
-    $tun = Get-NetAdapter -Name 'v6only-ci'
+    $tun=$null
+    for($attempt=0;$attempt -lt 40;$attempt++){
+        try{$tun=Get-NetAdapter -Name 'v6only-ci' -ErrorAction Stop;break}catch{Start-Sleep -Milliseconds 250}
+    }
+    if(!$tun){throw 'Forwarding adapter not registered after driver start'}
     Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv4 -Dhcp Disabled
     Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv4 -DadTransmits 0
     Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv6 -DadTransmits 0

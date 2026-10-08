@@ -94,6 +94,16 @@ function Stop-V6Core {
     Remove-Item $CoreReady,$CoreState -Force -ErrorAction SilentlyContinue
 }
 
+function Wait-ForwardingAdapter([string]$Name) {
+    # Driver readiness precedes WMI registration; the previous adapter's
+    # registry key may still be pending deletion during a quick restart.
+    for ($attempt=0; $attempt -lt 40; $attempt++) {
+        try { return Get-NetAdapter -Name $Name -ErrorAction Stop }
+        catch { Start-Sleep -Milliseconds 250 }
+    }
+    throw "Forwarding adapter $Name is unavailable after driver start"
+}
+
 function Start-V6Core($Adapter) {
     if (Test-CoreActive) { return }
     foreach ($file in @('v6core.exe','wintun.dll')) {
@@ -117,7 +127,7 @@ function Start-V6Core($Adapter) {
         Start-Sleep -Milliseconds 250
     }
     if (-not (Test-Path $CoreReady)) { throw 'Forwarding core readiness timeout' }
-    $tun = Get-NetAdapter -Name 'v6only-tun' -ErrorAction Stop
+    $tun = Wait-ForwardingAdapter 'v6only-tun'
     Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv4 -Dhcp Disabled
     Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv4 -DadTransmits 0
     Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv6 -DadTransmits 0

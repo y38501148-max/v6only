@@ -40,11 +40,11 @@ ifconfig lo0 inet6 2001:db8:1::3 prefixlen 128 alias
 "$BIN/netfixture" --listen4 203.0.113.3 --listen6 2001:db8:1::3 > "$BIN/fixture.log" 2>&1 &
 FIXTURE_PID=$!
 for _ in {1..100}; do
-    rg -q 'fixture ready' "$BIN/fixture.log" && break
+    grep -q 'fixture ready' "$BIN/fixture.log" && break
     kill -0 "$FIXTURE_PID" || { cat "$BIN/fixture.log"; exit 1; }
     sleep 0.1
 done
-rg -q 'fixture ready' "$BIN/fixture.log" || { cat "$BIN/fixture.log"; exit 1; }
+grep -q 'fixture ready' "$BIN/fixture.log" || { cat "$BIN/fixture.log"; exit 1; }
 start() {
     "$BIN/v6core" "$@" --device utun --ready "$BIN/ready" >> "$BIN/core.log" 2>&1 &
     CORE_PID=$!
