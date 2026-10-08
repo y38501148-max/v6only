@@ -52,6 +52,7 @@ assert shell('id', '-u') == '0', 'Rootable emulator required'
 server = http.server.HTTPServer(('127.0.0.1', 18766), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 address = '2001:db8:10::22/64'
+added_route = False
 try:
     # StartupSmoke persists global/automatic mode; no test-only VPN service is used.
     out = shell('am', 'instrument', '-w', 'edu.buaa.v6only.tests/.StartupSmoke')
@@ -62,6 +63,13 @@ try:
     for iteration in range(2):
         # nodad keeps this synthetic address out of Android's tentative-address cache.
         shell('ip', '-6', 'addr', 'add', address, 'dev', 'wlan0', 'nodad')
+        # Android 10 images can expose only a connected IPv6 subnet on Wi-Fi.
+        # Supply the fixture's default route too: an address alone is deliberately
+        # insufficient for the production readiness guard.
+        routes = shell('ip', '-6', 'route', 'show', 'table', 'all')
+        if not any(line.startswith('default ') and 'dev wlan0' in line for line in routes.splitlines()):
+            shell('ip', '-6', 'route', 'add', 'default', 'via', 'fe80::2', 'dev', 'wlan0')
+            added_route = True
         wait(vpn, 'IPv6 recovery establishes production VPN')
         shell('ip', '-6', 'addr', 'del', address, 'dev', 'wlan0')
         wait(lambda: not vpn(), 'IPv6 address loss releases VPN routes')
@@ -70,7 +78,15 @@ try:
         response = shell("printf 'GET / HTTP/1.0\\r\\nHost: fixture\\r\\n\\r\\n' | toybox nc -w 3 10.0.2.2 18766")
         assert 'v6only physical network restored' in response, response
         print('PASS: default HTTP works after IPv6 loss; monitor remains active', flush=True)
+except BaseException:
+    print(shell('ip', '-6', 'addr', 'show', 'dev', 'wlan0'), flush=True)
+    print(shell('ip', '-6', 'route', 'show', 'table', 'all'), flush=True)
+    print(shell('dumpsys', 'connectivity'), flush=True)
+    print(shell('logcat', '-d', '-s', 'V6VpnService'), flush=True)
+    raise
 finally:
+    if added_route:
+        subprocess.run(ADB + ['shell', 'ip', '-6', 'route', 'del', 'default', 'via', 'fe80::2', 'dev', 'wlan0'], capture_output=True)
     subprocess.run(ADB + ['shell', 'ip', '-6', 'addr', 'del', address, 'dev', 'wlan0'], capture_output=True)
     command('STOP')
     server.shutdown()
