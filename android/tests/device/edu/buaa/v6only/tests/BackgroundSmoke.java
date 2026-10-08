@@ -20,6 +20,7 @@ public final class BackgroundSmoke extends Instrumentation {
   {
    Activity a=startActivitySync(new Intent(getTargetContext(),BackgroundSettingsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));waitForIdleSync();SystemClock.sleep(300);
    if(label.equals("自启动与后台管理")){
+    SystemClock.sleep(4500);
     Bitmap b=getUiAutomation().takeScreenshot();File dir=getTargetContext().getExternalFilesDir("ui-checks");dir.mkdirs();try(FileOutputStream out=new FileOutputStream(new File(dir,"background-settings.png"))){b.compress(Bitmap.CompressFormat.PNG,100,out);}b.recycle();
    }
    runOnMainSync(()->{View button=find(a.getWindow().getDecorView(),label);if(button==null)throw new AssertionError("Missing action: "+label);button.performClick();});waitForIdleSync();SystemClock.sleep(700);

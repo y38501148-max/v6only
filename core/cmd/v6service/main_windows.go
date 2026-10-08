@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -40,12 +41,21 @@ func controller(action string) (json.RawMessage, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(root, "desktop-controller.ps1"), "-Action", action)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	// A background core may inherit a PowerShell output handle. Do not wait
+	// indefinitely for that descendant after the controller itself has exited.
+	cmd.WaitDelay = 2 * time.Second
 	b, e := cmd.CombinedOutput()
+	if errors.Is(e, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		e = nil
+	}
 	if e != nil {
 		return nil, fmt.Errorf("%s: %w", b, e)
 	}
 	if !json.Valid(b) {
-		return json.RawMessage(`{}`), nil
+		if (action == "watch" || action == "stop") && len(strings.TrimSpace(string(b))) == 0 {
+			return json.RawMessage(`{}`), nil
+		}
+		return nil, fmt.Errorf("invalid controller response: %s", b)
 	}
 	return json.RawMessage(b), nil
 }
