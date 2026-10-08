@@ -18,7 +18,9 @@ try{
  if($p.ExitCode -notin @(0,3010)){throw "MSI install failed: $($p.ExitCode)"}
  $service=Get-Service V6Only;if($service.Status -ne 'Running'){throw 'Installed service is not running'}
  Write-Host 'CHECK: initial service status'
- RPC @{action='status'}|ConvertTo-Json -Depth 12|Set-Content "$out/status.json"
+ $initial=RPC @{action='status'}
+ $initial|ConvertTo-Json -Depth 12|Set-Content "$out/status.json"
+ if($initial.flows -isnot [Array]){throw 'Empty flow list must serialize as a JSON array for the desktop UI'}
  $bad=$false;try{RPC @{action='arbitrary-shell';url='whoami'}}catch{$bad=$true};if(!$bad){throw 'RPC allowlist missing'}
  $installed=Join-Path $env:ProgramFiles 'V6Only'
  # Run the exact installer invoked by the desktop button, including recovery
@@ -51,6 +53,9 @@ try{
  & curl.exe --noproxy '*' -fsS --max-time 20 http://1.1.1.1/ -o NUL
  if($LASTEXITCODE){throw 'Physical IPv4 through Wintun failed'}
  Start-Sleep 2
+ $active=RPC @{action='status'}
+ $active|ConvertTo-Json -Depth 12|Set-Content "$out/active-status.json"
+ if($active.flows -isnot [Array] -or $active.flows.Count -lt 1){throw 'Active flow list must serialize as a nonempty JSON array'}
  $stats=RPC @{action='stats';from=0;to=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+1}
  if(($stats.v4_up+$stats.v4_down) -le 0){throw 'Traffic counters were not persisted'}
  $stats|ConvertTo-Json -Depth 12|Set-Content "$out/stats.json"
