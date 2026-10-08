@@ -156,6 +156,9 @@ func (r *Router) rawDial(ctx context.Context, network, address string) (net.Conn
 }
 func (r *Router) query(ctx context.Context, host string, qtype uint16) (*dns.Msg, error) {
 	key := fmt.Sprintf("%s/%d", strings.ToLower(strings.TrimSuffix(host, ".")), qtype)
+	return r.cachedQuery(ctx, key, func() (*dns.Msg, error) { return r.queryOnce(ctx, host, qtype) })
+}
+func (r *Router) cachedQuery(ctx context.Context, key string, lookup func() (*dns.Msg, error)) (*dns.Msg, error) {
 	r.queryMu.Lock()
 	if cached, ok := r.queryCache[key]; ok && time.Now().Before(cached.until) {
 		r.queryMu.Unlock()
@@ -179,7 +182,7 @@ func (r *Router) query(ctx context.Context, host string, qtype uint16) (*dns.Msg
 	pending := &dnsPending{done: make(chan struct{})}
 	r.queryPending[key] = pending
 	r.queryMu.Unlock()
-	msg, e := r.queryOnce(ctx, host, qtype)
+	msg, e := lookup()
 	ttl := time.Second
 	if e == nil {
 		ttl = 30 * time.Second
@@ -197,7 +200,11 @@ func (r *Router) query(ctx context.Context, host string, qtype uint16) (*dns.Msg
 	if len(r.queryCache) > 8192 {
 		r.queryCache = map[string]dnsCached{}
 	}
-	r.queryCache[key] = dnsCached{msg: msg, err: e, until: time.Now().Add(ttl)}
+	// A losing speculative query is canceled as soon as a connection succeeds.
+	// Its cancellation is not a DNS failure to cache for the next connection.
+	if ctx.Err() == nil {
+		r.queryCache[key] = dnsCached{msg: msg, err: e, until: time.Now().Add(ttl)}
+	}
 	pending.msg = msg
 	pending.err = e
 	delete(r.queryPending, key)
@@ -217,8 +224,7 @@ func (r *Router) queryOnce(ctx context.Context, host string, qtype uint16) (*dns
 		return a, nil
 	}
 	normalized := strings.ToLower(strings.TrimSuffix(host, "."))
-	campusHost := normalized == "buaa.edu.cn" || strings.HasSuffix(normalized, ".buaa.edu.cn") || strings.HasSuffix(normalized, ".local")
-	if qtype == dns.TypeAAAA && len(r.cfg.IPv6DNS) > 0 && !campusHost {
+	if qtype == dns.TypeAAAA && len(r.cfg.IPv6DNS) > 0 && !campusDomain(normalized) {
 		campus, e := r.queryServers(ctx, host, qtype, r.cfg.DNS, false)
 		if e == nil {
 			for _, rr := range campus.Answer {
@@ -237,7 +243,7 @@ func (r *Router) queryOnce(ctx context.Context, host string, qtype uint16) (*dns
 			checkCtx, cancel = context.WithTimeout(ctx, 1500*time.Millisecond)
 			defer cancel()
 		}
-		public, publicErr := r.queryServers(checkCtx, host, qtype, r.cfg.IPv6DNS, true)
+		public, publicErr := r.supplementalAAAA(checkCtx, host)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -541,7 +547,7 @@ func (r *Router) Dial(ctx context.Context, host, port string) (net.Conn, error) 
 		return nil, e
 	}
 	if len(addresses.V6) > 0 {
-		c, e := r.family(ctx, addresses.V6, port, "tcp6")
+		c, e := r.dialIPv6(ctx, host, port, addresses.V6)
 		if e != nil {
 			return nil, fmt.Errorf("IPv6 required for %s; IPv4 fallback forbidden: %w", host, e)
 		}

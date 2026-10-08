@@ -18,6 +18,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: {workspaces: 'desktop/src-tauri -> target', cache-on-failure: true}
+      - name: Verify alternate IPv6 CDN policy on Windows
+        shell: pwsh
+        run: |
+          Set-Location core
+          go test -v -run 'TestAlternateIPv6' ./...
+          if($LASTEXITCODE -ne 0){throw 'Alternate IPv6 CDN regression failed'}
       - name: Build desktop, service and MSI
         shell: pwsh
         run: |

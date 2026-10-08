@@ -13,6 +13,7 @@
     </application>
     <instrumentation android:name=".BackgroundSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".StartupSmoke" android:targetPackage="edu.buaa.v6only"/>
+    <instrumentation android:name=".ReadinessSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".NetworkSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".UiSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".TunnelSmoke" android:targetPackage="edu.buaa.v6only"/>

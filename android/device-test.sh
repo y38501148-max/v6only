@@ -89,6 +89,8 @@ esac
 # A failed consent test can leave an OS dialog above the next instrumentation activity.
 "${ADB[@]}" shell am force-stop com.android.vpndialogs
 "${ADB[@]}" shell am force-stop edu.buaa.v6only
+instrument edu.buaa.v6only.tests/.ReadinessSmoke | tee "$OUT/readiness-result.txt"
+grep -q 'PASS: physical IPv6 readiness' "$OUT/readiness-result.txt"
 if [[ ${V6ONLY_TEST_SUITE:-network} == other-vpn ]]; then
   "${ADB[@]}" shell svc wifi disable
   "${ADB[@]}" shell svc data enable

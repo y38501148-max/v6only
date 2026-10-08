@@ -42,3 +42,7 @@ Loopback fixture servers on the host provide controlled IPv4/IPv6 endpoints and 
 Results are written to `android/build/device-tests/result.txt`; assertions and missing success markers fail the script. Use `V6ONLY_TEST_SUITE=ui` for the existing UI suite, or `android/tests/device/lifecycle-test.py` for process/reboot checks. Debug signing differs from release signing; use only disposable emulator data when replacing an installed app.
 
 These checks do not establish physical campus behavior, strict private DNS/ECH/proxy combinations, NAT64-only networks, or vendor background-process policies. The complete emulator fixture is independent from the optional campus gate; both suites must pass.
+
+### IPv6 消失与恢复
+
+在已安装生产 APK 和测试 APK 的可 root 临时模拟器上运行 `python3 android/tests/device/readiness-test.py`（支持 `ANDROID_SERIAL` 与 `ADB`）。脚本通过真实网卡地址变化验证：无全球 IPv6 时不接管；IPv6 恢复自动连接；地址丢失移除 VPN 路由，系统 HTTP 可用；再恢复可再次连接。该测试拒绝在个人手机上运行。

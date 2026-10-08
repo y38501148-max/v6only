@@ -56,8 +56,9 @@ public final class UiSmoke extends Instrumentation {
                 check(!prefs.getBoolean("auto", true), "manual startup preference persists");
                 check(!prefs.getBoolean("enabled", false), "changing startup mode does not start service");
                 click(R.id.toggle_service);
-                await(() -> V6VpnServiceExt.running(context), "global connection starts outside campus");
-                await(() -> text(R.id.status_title).equals("连接已开启"), "connected feedback");
+                await(() -> V6VpnServiceExt.running(context) || V6VpnServiceExt.message().contains("没有可用 IPv6"), "physical network readiness evaluated");
+                boolean connected = V6VpnServiceExt.running(context);
+                await(() -> text(R.id.status_title).equals(connected ? "连接已开启" : "等待网络就绪"), "connected or IPv6 standby feedback");
                 check(text(R.id.toggle_service).equals("停止服务"), "stop action label");
                 capture("connected");
                 click(R.id.mode_auto);
