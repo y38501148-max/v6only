@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-async function desktop({installed = false, enabled = false, installError} = {}) {
+async function desktop({installed = false, enabled = false, installError, flows = []} = {}) {
   const elements = new Map(), calls = [];
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
@@ -26,7 +26,7 @@ async function desktop({installed = false, enabled = false, installError} = {}) 
       if (!installed) throw Error('Service unavailable');
       if (args.action === 'enable') enabled = true;
       if (args.action === 'disable') enabled = false;
-      if (args.action === 'status') return {installed, enabled, health: {}, flows: []};
+      if (args.action === 'status') return {installed, enabled, health: {}, flows};
       return {};
     }}}},
     setInterval() {},
@@ -62,4 +62,16 @@ test('An installed service enables and disables without reinstalling', async () 
   await app.click();
   assert.deepEqual(app.calls[0], ['service', 'disable']);
   assert.equal(app.element('control').textContent, '启用转发');
+});
+
+// Windows PowerShell 5.1 attaches extended properties to Invoke-RestMethod
+// arrays. A rendering error used to reset installed=false in refresh().
+test('Windows PowerShell wrapped flow arrays do not masquerade as missing service', async () => {
+  for (const flows of [{value: [], Count: 0}, {value: [{host: 'v4.example', remote: '127.0.0.1:80', network: 'tcp4'}], Count: 1}]) {
+    const app = await desktop({installed: true, enabled: true, flows});
+    assert.equal(app.element('control').textContent, '关闭转发');
+    await app.click();
+    assert.deepEqual(app.calls[0], ['service', 'disable']);
+    assert.ok(!app.calls.some(([command]) => command === 'install_service'));
+  }
 });

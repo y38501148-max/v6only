@@ -25,7 +25,9 @@ switch($Action){
  }
 }
 if($Action -in @('status','enable','disable')){
- $health=$null;$flows=@();try{$health=Invoke-RestMethod http://127.0.0.1:17890/health -TimeoutSec 2;$flows=Invoke-RestMethod http://127.0.0.1:17890/flows -TimeoutSec 2}catch{}
+ # Parse flow JSON explicitly: Windows PowerShell can serialize the array
+ # returned by Invoke-RestMethod as {value: [], Count: 0}, breaking the UI.
+ $health=$null;$flows=@();try{$health=Invoke-RestMethod http://127.0.0.1:17890/health -TimeoutSec 2;$flows=@((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:17890/flows -TimeoutSec 2).Content | ConvertFrom-Json)}catch{}
  $adapter=Get-ActiveAdapter
  $physicalDns=@();if(Test-Path $Snapshot){$physicalDns=@((Get-Content $Snapshot -Raw|ConvertFrom-Json).OriginalDns)}elseif($adapter){$physicalDns=@(Get-AdapterDns $adapter)}
  $addresses=@(Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue|Where-Object IPAddress -Match '^[23][0-9a-fA-F]{3}:')
