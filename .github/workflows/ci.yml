@@ -213,7 +213,7 @@ jobs:
           target: google_apis
           disable-animations: true
           # The action runs each script line in its own shell; keep exports together.
-          script: export V6ONLY_ANDROID_ABIS=x86_64 ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-36/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"; for suite in tunnel ui; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done; adb shell am instrument -w edu.buaa.v6only.tests/.BackgroundSmoke | tee android/build/device-tests/background-result.txt; grep -q "PASS:" android/build/device-tests/background-result.txt
+          script: export V6ONLY_ANDROID_ABIS=x86_64 ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-36/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"; for suite in tunnel ui; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done; adb shell am instrument -w edu.buaa.v6only.tests/.BackgroundSmoke | tee android/build/device-tests/background-result.txt; grep -q "PASS:" android/build/device-tests/background-result.txt; python3 android/tests/device/readiness-test.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

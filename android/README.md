@@ -27,7 +27,7 @@
 
 ## 路由和限制
 
-有 AAAA 的目标仅连接 IPv6，失败不退回 IPv4；确认无 AAAA 的目标允许 IPv4。网络 DNS 漏掉公网 AAAA 时通过公共 DNS 补充查询；网络 DNS 已成功返回无 AAAA 时，补充查询最多等待 1 秒，公共 DNS 不通不会阻断已确认的 IPv4 目标。两组 DNS 都失败时仍报错。校园内网名称保留网络 DNS。网络有原生 IPv6 时公共 DNS 使用 IPv6 传输；仅 IPv4 网络使用 IPv4 DNS 传输，但这不能让 IPv6 目标在缺少 IPv6 的网络上工作。
+有 AAAA 的目标仅连接 IPv6，失败不退回 IPv4；确认无 AAAA 的目标允许 IPv4。网络 DNS 漏掉公网 AAAA 时通过公共 DNS 补充查询；网络 DNS 已成功返回无 AAAA 时，补充查询最多等待 1.5 秒，公共 DNS 不通不会阻断已确认的 IPv4 目标。两组 DNS 都失败时仍报错。校园内网名称保留网络 DNS。补充 DNS 同时尝试 IPv4/IPv6、TCP/UDP。当前物理网络必须具有可用的全球 IPv6 地址和默认路由，否则暂停接管并保留系统网络；IPv6 恢复后自动重新接管。已解析的 IPv6 CDN 节点连接缓慢时，会补查其他 IPv6 节点，仍不回退 IPv4。
 
 Android 版对 ChatGPT/OpenAI 域名禁用 IPv6，以 TCP/IPv4 连接。这是 IPv4 直连，并未内置桌面 iKuuu 代理：如果手机网络无法直连 ChatGPT，还需要可用的代理方案。macOS 当前既有 IPv4 代理设置不受安卓版影响。
 

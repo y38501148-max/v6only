@@ -1,6 +1,6 @@
 [package]
 name = "v6only-desktop"
-version = "2.1.2"
+version = "2.1.3"
 edition = "2021"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

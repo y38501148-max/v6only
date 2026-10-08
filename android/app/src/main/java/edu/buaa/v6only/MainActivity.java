@@ -286,7 +286,7 @@ public class MainActivity extends Activity {
             showState("等待 VPN 授权", "授权后开始连接。", "待授权", neutral, Color.WHITE);
         } else if (monitoring) {
             String message = V6VpnServiceExt.message();
-            if (message.contains("失败") || message.contains("DNS")) {
+            if (message.contains("失败") || message.contains("DNS") || message.contains("没有可用 IPv6")) {
                 showState("等待网络就绪", message, "等待中", Color.rgb(252, 218, 151), Color.rgb(83, 56, 10));
             } else if (message.contains("等待网络连接")) {
                 showState("等待网络", "服务仍在后台运行，网络恢复后会继续连接。", "监听中", neutral, Color.WHITE);

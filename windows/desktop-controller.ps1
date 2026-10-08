@@ -34,5 +34,5 @@ if($Action -in @('status','enable','disable')){
  $addresses=@(Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue|Where-Object IPAddress -Match '^[23][0-9a-fA-F]{3}:')
  $logs=if(Test-Path $LogFile){(Get-Content $LogFile -Tail 30)-join "`n"}else{''}
  $logs+="`n";if(Test-Path (Join-Path $dir 'core-error.log')){$logs+=(Get-Content (Join-Path $dir 'core-error.log') -Tail 20)-join "`n"}
- @{interface_name=$adapter.Name;dns=$physicalDns;installed=$true;enabled=((Test-Path $Marker) -and (Test-CoreActive));suspended=(!(Test-Path $enabled) -or (Test-Suspended $SuspendFlg));health=$health;flows=$flows;ipv6_interface=(($addresses|ForEach-Object {'inet6 '+$_.IPAddress})-join "`n");proxy='';pac='';logs=$logs;version='2.1.2'}|ConvertTo-Json -Depth 12 -Compress
+ @{interface_name=$adapter.Name;dns=$physicalDns;installed=$true;enabled=((Test-Path $Marker) -and (Test-CoreActive));suspended=(!(Test-Path $enabled) -or (Test-Suspended $SuspendFlg));health=$health;flows=$flows;ipv6_interface=(($addresses|ForEach-Object {'inet6 '+$_.IPAddress})-join "`n");proxy='';pac='';logs=$logs;version='2.1.3'}|ConvertTo-Json -Depth 12 -Compress
 }

@@ -89,6 +89,14 @@ public class V6VpnService extends VpnService {
             publish(state.network == null ? "等待网络连接" : "自动模式：等待接入校园网");
             return;
         }
+        // An IPv4-only physical network cannot carry this strict IPv6 policy.
+        // Keep watching LinkProperties so IPv6 recovery starts the tunnel again.
+        // In particular, never borrow cellular IPv6 while bound to Wi-Fi.
+        if (!NetworkReadiness.hasUsableIpv6(state.links)) {
+            closeTun();
+            publish("当前网络没有可用 IPv6，已暂停接管；等待 IPv6 恢复");
+            return;
+        }
         if (prepare(this) != null) {
             closeTun();
             V6VpnServiceExt.setPermissionRequired(true);
@@ -107,7 +115,8 @@ public class V6VpnService extends VpnService {
             return;
         }
         boolean metered = !state.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
-        String key = state.network + ":" + dns + ":" + state.links.getDomains() + ":" + metered;
+        String key = state.network + ":" + dns + ":" + state.links.getDomains() + ":" + metered
+                + ":" + publicDns(state.network);
         if (tun != null && key.equals(configuration)) {
             publish("已连接");
             return;
