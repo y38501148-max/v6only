@@ -9,7 +9,7 @@ async function desktop({installed = false, enabled = false, installError, flows 
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       value: 'all', textContent: '', hidden: false, disabled: false, style: {},
-      classList: {toggle() {}}, append() {}, replaceChildren() {}, setAttribute() {}, addEventListener() {},
+      children: [], classList: {toggle() {}}, append(...nodes) { this.children.push(...nodes); }, replaceChildren(...nodes) { this.children = nodes; }, setAttribute() {}, addEventListener() {},
     });
     return elements.get(id);
   }
@@ -74,4 +74,25 @@ test('Windows PowerShell wrapped flow arrays do not masquerade as missing servic
     assert.deepEqual(app.calls[0], ['service', 'disable']);
     assert.ok(!app.calls.some(([command]) => command === 'install_service'));
   }
+});
+
+
+test('Actual PowerShell nested wrappers render domain, address, protocol and traffic', async () => {
+  const flow = {host: 'video.bilivideo.com', remote: '[2001:db8::80]:443', network: 'tcp6', upload_bytes: 2048, download_bytes: 3145728};
+  for (const flows of [[flow], {value:[flow],Count:1}, [{value:[flow],Count:1}]]) {
+    const app = await desktop({installed:true, enabled:true, flows});
+    const rows = app.element('flows-body').children;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].children[0].textContent, flow.host);
+    assert.equal(rows[0].children[1].textContent, flow.remote);
+    assert.equal(rows[0].children[2].children[0].textContent, 'IPv6');
+    assert.equal(rows[0].children[3].textContent, '↑ 2.00 KiB / ↓ 3.00 MiB');
+  }
+});
+
+test('Empty nested wrapper renders empty state, never a blank IPv4 connection', async () => {
+  const app = await desktop({installed:true, enabled:true, flows:[{value:[],Count:0}]});
+  const rows = app.element('flows-body').children;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].children[0].textContent, '暂无符合条件的连接');
 });

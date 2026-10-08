@@ -56,6 +56,12 @@ try{
  $active=RPC @{action='status'}
  $active|ConvertTo-Json -Depth 12|Set-Content "$out/active-status.json"
  if($active.flows -isnot [Array] -or $active.flows.Count -lt 1){throw 'Active flow list must serialize as a nonempty JSON array'}
+ foreach($flow in $active.flows){
+  if(!$flow.host -or !$flow.remote -or $flow.network -notin @('tcp4','tcp6','udp4','udp6')){throw 'Flow must be a real connection, not a nested PowerShell wrapper'}
+  if($null -eq $flow.upload_bytes -or $null -eq $flow.download_bytes){throw 'Flow is missing traffic byte counters'}
+ }
+ if(!($active.flows|Where-Object {($_.upload_bytes -gt 0) -and ($_.download_bytes -gt 0)})){throw 'No flow contains actual upload and download bytes'}
+
  $stats=RPC @{action='stats';from=0;to=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+1}
  if(($stats.v4_up+$stats.v4_down) -le 0){throw 'Traffic counters were not persisted'}
  $stats|ConvertTo-Json -Depth 12|Set-Content "$out/stats.json"

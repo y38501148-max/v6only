@@ -161,7 +161,7 @@ public class V6VpnService extends VpnService {
     protected List<String> publicDns(Network network) {
         android.net.LinkProperties links = getSystemService(android.net.ConnectivityManager.class).getLinkProperties(network);
         boolean v6 = links != null && links.getLinkAddresses().stream().anyMatch(a -> a.getAddress() instanceof Inet6Address && (a.getAddress().getAddress()[0] & 0xe0) == 0x20);
-        return java.util.Arrays.asList(v6 ? new String[]{"2400:3200::1", "2400:3200:baba::1"} : new String[]{"223.5.5.5", "223.6.6.6"});
+        return java.util.Arrays.asList(v6 ? new String[]{"2400:3200::1", "2400:3200:baba::1", "223.5.5.5", "223.6.6.6"} : new String[]{"223.5.5.5", "223.6.6.6"});
     }
 
     private PendingIntent openActivity() {

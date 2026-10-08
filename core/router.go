@@ -229,11 +229,12 @@ func (r *Router) queryOnce(ctx context.Context, host string, qtype uint16) (*dns
 		}
 		// Supplement missing public AAAA records, but do not turn a working
 		// network resolver's NODATA into SERVFAIL when public DNS is blocked.
-		// Bound this optional check below Android's DNS retry interval.
+		// Leave room for a one-second TCP retry while remaining below
+		// Android's DNS retry interval.
 		checkCtx := ctx
 		if e == nil {
 			var cancel context.CancelFunc
-			checkCtx, cancel = context.WithTimeout(ctx, time.Second)
+			checkCtx, cancel = context.WithTimeout(ctx, 1500*time.Millisecond)
 			defer cancel()
 		}
 		public, publicErr := r.queryServers(checkCtx, host, qtype, r.cfg.IPv6DNS, true)
@@ -247,51 +248,110 @@ func (r *Router) queryOnce(ctx context.Context, host string, qtype uint16) (*dns
 	}
 	return r.queryServers(ctx, host, qtype, r.cfg.DNS, false)
 }
+
+// Supplemental resolvers can be reachable over only one transport. Race their
+// TCP/UDP queries within the caller's budget so one dropped SYN cannot consume
+// all the time before UDP or the second resolver gets a chance.
+func (r *Router) queryPublicServers(ctx context.Context, host string, qtype uint16, servers []string) (*dns.Msg, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type answer struct {
+		msg *dns.Msg
+		err error
+	}
+	results := make(chan answer, 2*len(servers))
+	for _, server := range servers {
+		for _, proto := range []string{"tcp", "udp"} {
+			go func(server, proto string) {
+				m, e := r.exchangeDNS(ctx, host, qtype, server, proto)
+				results <- answer{m, e}
+			}(server, proto)
+		}
+	}
+	var valid *dns.Msg
+	var last error
+	for range 2 * len(servers) {
+		select {
+		case a := <-results:
+			if a.err != nil {
+				last = a.err
+				continue
+			}
+			// NODATA from one resolver must not hide an AAAA response from
+			// another. Keep it only if none of the remaining queries finds one.
+			for _, rr := range a.msg.Answer {
+				if rr.Header().Rrtype == qtype {
+					return a.msg, nil
+				}
+			}
+			if valid == nil || a.msg.Rcode == dns.RcodeSuccess {
+				valid = a.msg
+			}
+		case <-ctx.Done():
+			if valid != nil {
+				return valid, nil
+			}
+			return nil, ctx.Err()
+		}
+	}
+	if valid != nil {
+		return valid, nil
+	}
+	return nil, fmt.Errorf("DNS lookup %s: %w", host, last)
+}
+
+func (r *Router) exchangeDNS(ctx context.Context, host string, qtype uint16, server, proto string) (*dns.Msg, error) {
+	if _, _, e := net.SplitHostPort(server); e != nil {
+		server = net.JoinHostPort(server, "53")
+	}
+	q := new(dns.Msg)
+	q.SetQuestion(dns.Fqdn(host), qtype)
+	q.SetEdns0(1232, false)
+	sub, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	c, e := r.rawDial(sub, proto, server)
+	if e != nil {
+		return nil, e
+	}
+	defer c.Close()
+	// Cancel losing queries immediately, including already-connected sockets.
+	stop := context.AfterFunc(sub, func() { c.Close() })
+	defer stop()
+	deadline, _ := sub.Deadline()
+	if e = c.SetDeadline(deadline); e != nil {
+		return nil, e
+	}
+	ans, _, e := (&dns.Client{Net: proto}).ExchangeWithConnContext(sub, q, &dns.Conn{Conn: c})
+	if e != nil {
+		return nil, e
+	}
+	if ans.Truncated {
+		return nil, errors.New("truncated DNS response")
+	}
+	if ans.Rcode != dns.RcodeSuccess && ans.Rcode != dns.RcodeNameError {
+		return nil, fmt.Errorf("DNS rcode %d", ans.Rcode)
+	}
+	return ans, nil
+}
+
 func (r *Router) queryServers(ctx context.Context, host string, qtype uint16, servers []string, publicIPv6 bool) (*dns.Msg, error) {
 	if len(servers) == 0 {
 		return nil, errors.New("no physical DNS servers configured")
 	}
+	if publicIPv6 {
+		return r.queryPublicServers(ctx, host, qtype, servers)
+	}
 	var last error
 	for _, server := range servers {
-		if _, _, e := net.SplitHostPort(server); e != nil {
-			server = net.JoinHostPort(server, "53")
-		}
-		q := new(dns.Msg)
-		q.SetQuestion(dns.Fqdn(host), qtype)
-		q.SetEdns0(1232, false)
-		protocols := []string{"udp", "tcp"}
-		if publicIPv6 {
-			protocols = []string{"tcp", "udp"}
-		}
-		for _, proto := range protocols {
-			sub, cancel := context.WithTimeout(ctx, 2*time.Second)
-			c, e := r.rawDial(sub, proto, server)
+		for _, proto := range []string{"udp", "tcp"} {
+			ans, e := r.exchangeDNS(ctx, host, qtype, server, proto)
 			if e == nil {
-				e = c.SetDeadline(time.Now().Add(2 * time.Second))
-				if e == nil {
-					var ans *dns.Msg
-					ans, _, e = (&dns.Client{Net: proto}).ExchangeWithConnContext(sub, q, &dns.Conn{Conn: c})
-					c.Close()
-					cancel()
-					if e == nil {
-						if ans.Truncated && proto == "udp" {
-							continue
-						}
-						if ans.Rcode == dns.RcodeSuccess || ans.Rcode == dns.RcodeNameError {
-							return ans, nil
-						}
-						e = fmt.Errorf("DNS rcode %d", ans.Rcode)
-					}
-				} else {
-					c.Close()
-				}
+				return ans, nil
 			}
-			cancel()
 			last = e
-			// A UDP timeout must still try TCP (and vice versa).
-		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 		}
 	}
 	return nil, fmt.Errorf("DNS lookup %s: %w", host, last)

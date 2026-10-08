@@ -9,9 +9,9 @@ import java.io.IOException;
 
 /** Compiled only into v6only-fixture.apk. Never part of a release APK. */
 public class FixtureVpn extends V6VpnService {
-    // Exercise production's supplemental lookup with an unavailable public DNS.
-    // The old empty list bypassed the exact path that broke IPv4-only sites.
-    @Override protected java.util.List<String> publicDns(android.net.Network network) { return java.util.Collections.singletonList("10.0.2.2:15354"); }
+    // First supplemental resolver drops requests; the second supplies missing
+    // AAAA only over TCP (UDP returns NODATA), matching the campus failure.
+    @Override protected java.util.List<String> publicDns(android.net.Network network) { return java.util.Arrays.asList("[fec0::2]:15354", "10.0.2.2:15355"); }
 
     private Network physical;
     public static volatile String failure = "";

@@ -114,3 +114,66 @@ func TestBothDNSResolversFailRemainAnError(t *testing.T) {
 		t.Fatal("DNS failures are not proof of no AAAA")
 	}
 }
+
+func TestSupplementalDNSRacesBlockedTransportAndResolver(t *testing.T) {
+	for _, mode := range []string{"tcp_blocked", "first_resolver_blocked", "first_resolver_nodata", "udp_nodata", "tcp_one_second"} {
+		t.Run(mode, func(t *testing.T) {
+			local, err := net.ListenPacket("udp4", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &dns.Server{PacketConn: local, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, q *dns.Msg) {
+				a := new(dns.Msg)
+				a.SetReply(q)
+				if q.Question[0].Qtype == dns.TypeA {
+					a.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 30}, A: net.ParseIP("192.0.2.80")}}
+				}
+				w.WriteMsg(a)
+			})}
+			go server.ActivateAndServe()
+			t.Cleanup(func() { server.Shutdown() })
+			r := New(Config{DNS: []string{local.LocalAddr().String()}, IPv6DNS: []string{"192.0.2.1", "192.0.2.2"}}, nil)
+			t.Cleanup(r.Close)
+			r.DialOverride = func(ctx context.Context, network, address string) (net.Conn, error) {
+				if address == local.LocalAddr().String() {
+					return (&net.Dialer{}).DialContext(ctx, network, address)
+				}
+				blocked := (network == "tcp" && mode != "udp_nodata" && mode != "tcp_one_second") || (mode == "first_resolver_blocked" && address == "192.0.2.1:53")
+				if blocked {
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				client, peer := net.Pipe()
+				go func() {
+					defer peer.Close()
+					c := &dns.Conn{Conn: peer}
+					q, e := c.ReadMsg()
+					if e != nil {
+						return
+					}
+					a := new(dns.Msg)
+					a.SetReply(q)
+					if (mode != "first_resolver_nodata" || address != "192.0.2.1:53") && ((mode != "udp_nodata" && mode != "tcp_one_second") || network != "udp") {
+						if mode == "first_resolver_nodata" || mode == "udp_nodata" {
+							time.Sleep(30 * time.Millisecond)
+						}
+						if mode == "tcp_one_second" {
+							time.Sleep(1050 * time.Millisecond)
+						}
+						a.Answer = []dns.RR{&dns.AAAA{Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 30}, AAAA: net.ParseIP("2001:db8::80")}}
+					}
+					c.WriteMsg(a)
+				}()
+				return client, nil
+			}
+			started := time.Now()
+			got, err := r.Resolve(context.Background(), "video.example")
+			if err != nil || len(got.V6) != 1 {
+				t.Fatalf("missed reachable supplemental AAAA: %+v, %v", got, err)
+			}
+			if mode != "tcp_one_second" && time.Since(started) > 500*time.Millisecond {
+				t.Fatal("blocked query delayed usable AAAA")
+			}
+		})
+	}
+}
