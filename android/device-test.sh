@@ -16,6 +16,11 @@ fi
 # The fixture lives on emulator loopback. Public captive-portal probes can be
 # unreachable on CI and disable AndroidWifi auto-join before the app even starts.
 "${ADB[@]}" shell settings put global captive_portal_mode 0
+"${ADB[@]}" shell settings put global private_dns_mode off
+"${ADB[@]}" shell settings put global screen_off_timeout 1800000
+# Avoid unrelated system-app background traffic against the synthetic DNS fixture.
+"${ADB[@]}" shell pm disable-user --user 0 com.google.android.gms >/dev/null 2>&1 || true
+"${ADB[@]}" shell pm disable-user --user 0 com.android.vending >/dev/null 2>&1 || true
 if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel || ${V6ONLY_TEST_SUITE:-network} == handover ]]; then export V6ONLY_TEST_FIXTURE=1; fi
 bash "$PROJ/build-apk.sh"
 OUT="$PROJ/build/device-tests"

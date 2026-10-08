@@ -23,8 +23,13 @@ public final class BackgroundSmoke extends Instrumentation {
     Bitmap b=getUiAutomation().takeScreenshot();File dir=getTargetContext().getExternalFilesDir("ui-checks");dir.mkdirs();try(FileOutputStream out=new FileOutputStream(new File(dir,"background-settings.png"))){b.compress(Bitmap.CompressFormat.PNG,100,out);}b.recycle();
    }
    runOnMainSync(()->{View button=find(a.getWindow().getDecorView(),label);if(button==null)throw new AssertionError("Missing action: "+label);button.performClick();});waitForIdleSync();SystemClock.sleep(700);
-   AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();
-   if(root==null||root.getPackageName()==null||!root.getPackageName().toString().startsWith("com.android.settings"))throw new AssertionError("Settings action did not open: "+label+" root="+(root==null?"null":root.getPackageName()));
+   String state;
+   try(android.os.ParcelFileDescriptor fd=getUiAutomation().executeShellCommand("dumpsys activity activities");java.io.InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(fd)){
+    java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();TestIo.copy(in,out);state=out.toString("UTF-8");
+   }
+   boolean opened=false;for(String line:state.split("\n")){if(line.toLowerCase(java.util.Locale.ROOT).contains("resumed")&&line.contains("com.android.settings")){opened=true;break;}}
+   if(!opened)throw new AssertionError("Settings action did not open: "+label);
+
 
   }
   result.putString("stream","\nPASS: background setting opens: "+label+"\n");finish(Activity.RESULT_OK,result);
