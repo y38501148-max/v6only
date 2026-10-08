@@ -22,3 +22,4 @@ target/
 macos/v6service
 desktop/src-tauri/resources/
 windows/v6service.exe
+desktop/src-tauri/gen/

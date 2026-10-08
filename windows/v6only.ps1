@@ -104,7 +104,9 @@ function Start-V6Core($Adapter) {
     if ($Desktop) {
         $upstream = @($state.OriginalDns | Where-Object { $_ -ne '127.0.0.1' -and $_ -ne '::1' })
         if (-not $upstream) { $upstream = @('223.5.5.5','223.6.6.6') }
-        $args = '--interface "' + $Adapter.Name + '" --device v6only-tun --dns ' + ($upstream -join ',') + ' --ipv6-dns 2400:3200::1,2400:3200:baba::1 --chatgpt-ipv4 --dns-listen 127.0.0.1:53 --stats-db "' + (Join-Path (Split-Path $Marker) 'traffic.sqlite') + '" --ready "' + $CoreReady + '"'
+        $supplement='223.5.5.5,223.6.6.6'
+        if(Get-NetIPAddress -InterfaceIndex $Adapter.ifIndex -AddressFamily IPv6 -ErrorAction SilentlyContinue|Where-Object IPAddress -Match '^[23][0-9a-fA-F]{3}:'){$supplement='2400:3200::1,2400:3200:baba::1'}
+        $args = '--interface "' + $Adapter.Name + '" --device v6only-tun --dns ' + ($upstream -join ',') + ' --ipv6-dns ' + $supplement + ' --chatgpt-ipv4 --dns-listen 127.0.0.1:53 --stats-db "' + (Join-Path (Split-Path $Marker) 'traffic.sqlite') + '" --ready "' + $CoreReady + '"'
     }
     $process = Start-Process -FilePath (Join-Path $CoreDir 'v6core.exe') -ArgumentList $args -WorkingDirectory $CoreDir -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path (Split-Path $Marker) 'core.log') -RedirectStandardError (Join-Path (Split-Path $Marker) 'core-error.log')
