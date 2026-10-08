@@ -28,7 +28,7 @@ mkdir -p "$OUT/obj" "$OUT/apk" "$OUT/web"
 printf 'v6only network regression fixture\n' > "$OUT/web/marker"
 if [[ ${V6ONLY_TEST_SUITE:-network} == tunnel ]]; then
   (cd "$PROJ/../core" && go build -o "$OUT/netfixture" ./cmd/netfixture)
-  "$OUT/netfixture" --listen4 127.0.0.1 --listen6 ::1 --v4 10.0.2.2 --v6 fec0::2 --bad6 ::1 > "$OUT/http.log" 2>&1 &
+  "$OUT/netfixture" --listen4 127.0.0.1 --listen6 ::1 --v4 10.0.2.2 --v6 fec0::2 --bad6 ::1 --supplement-fixture > "$OUT/http.log" 2>&1 &
 else
   (cd "$OUT/web" && exec python3 "$PROJ/tests/device/network-fixture.py") > "$OUT/http.log" 2>&1 &
 fi

@@ -25,13 +25,14 @@ switch($Action){
  }
 }
 if($Action -in @('status','enable','disable')){
- # Parse flow JSON explicitly: Windows PowerShell can serialize the array
- # returned by Invoke-RestMethod as {value: [], Count: 0}, breaking the UI.
- $health=$null;$flows=@();try{$health=Invoke-RestMethod http://127.0.0.1:17890/health -TimeoutSec 2;$flows=@((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:17890/flows -TimeoutSec 2).Content | ConvertFrom-Json)}catch{}
+ # Enumerate the parsed array into a new array. PowerShell 5.1 adds
+ # extended properties even to ConvertFrom-Json arrays; wrapping that
+ # object in @() alone leaves a nested {value, Count} object in the UI.
+ $health=$null;$flows=@();try{$health=Invoke-RestMethod http://127.0.0.1:17890/health -TimeoutSec 2;$parsedFlows=ConvertFrom-Json -InputObject ((Invoke-WebRequest -UseBasicParsing http://127.0.0.1:17890/flows -TimeoutSec 2).Content);$flows=@(foreach($flow in $parsedFlows){$flow})}catch{}
  $adapter=Get-ActiveAdapter
  $physicalDns=@();if(Test-Path $Snapshot){$physicalDns=@((Get-Content $Snapshot -Raw|ConvertFrom-Json).OriginalDns)}elseif($adapter){$physicalDns=@(Get-AdapterDns $adapter)}
  $addresses=@(Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue|Where-Object IPAddress -Match '^[23][0-9a-fA-F]{3}:')
  $logs=if(Test-Path $LogFile){(Get-Content $LogFile -Tail 30)-join "`n"}else{''}
  $logs+="`n";if(Test-Path (Join-Path $dir 'core-error.log')){$logs+=(Get-Content (Join-Path $dir 'core-error.log') -Tail 20)-join "`n"}
- @{interface_name=$adapter.Name;dns=$physicalDns;installed=$true;enabled=((Test-Path $Marker) -and (Test-CoreActive));suspended=(!(Test-Path $enabled) -or (Test-Suspended $SuspendFlg));health=$health;flows=$flows;ipv6_interface=(($addresses|ForEach-Object {'inet6 '+$_.IPAddress})-join "`n");proxy='';pac='';logs=$logs;version='2.1.1'}|ConvertTo-Json -Depth 12 -Compress
+ @{interface_name=$adapter.Name;dns=$physicalDns;installed=$true;enabled=((Test-Path $Marker) -and (Test-CoreActive));suspended=(!(Test-Path $enabled) -or (Test-Suspended $SuspendFlg));health=$health;flows=$flows;ipv6_interface=(($addresses|ForEach-Object {'inet6 '+$_.IPAddress})-join "`n");proxy='';pac='';logs=$logs;version='2.1.2'}|ConvertTo-Json -Depth 12 -Compress
 }

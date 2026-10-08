@@ -46,6 +46,30 @@ public class TunnelSmoke extends Instrumentation {
                 }
                 status("PASS "+item[0]+" TCP/UDP chooses IPv"+item[1]);
             }
+            // Fresh domain per round prevents DNS cache from hiding intermittent
+            // failures. Read actual video-sized payloads and verify the exit family.
+            long started=SystemClock.elapsedRealtime();
+            for(int round=0;round<20;round++){
+                String host="supplement-"+round+".test";
+                String ip=query(vpn,host,false);
+                try(Socket socket=new Socket()){
+                    vpn.bindSocket(socket);socket.connect(new InetSocketAddress(ip,18080),10000);socket.setSoTimeout(10000);
+                    socket.getOutputStream().write(("GET /video HTTP/1.0\r\nHost: "+host+"\r\n\r\n").getBytes("US-ASCII"));
+                    ByteArrayOutputStream out=new ByteArrayOutputStream();TestIo.copy(socket.getInputStream(),out);
+                    check(out.size()>524288 && out.toString("US-ASCII").endsWith("tcp6\n"),"supplemental video uses IPv6: "+host);
+                }
+            }
+            org.json.JSONArray flows=new org.json.JSONArray(CoreNative.flows());
+            int videos=0;
+            for(int i=0;i<flows.length();i++){
+                org.json.JSONObject f=flows.getJSONObject(i);
+                if(f.optString("host").startsWith("supplement-")){
+                    check(f.optString("network").equals("tcp6") && f.optLong("download_bytes")>524288,"actual IPv6 video bytes recorded");
+                    videos++;
+                }
+            }
+            check(videos==20,"all fresh supplemental video connections recorded");
+            status("PASS 20 fresh supplemental DNS video flows, over 10 MiB via IPv6, "+(SystemClock.elapsedRealtime()-started)+" ms");
             String bad=query(vpn,"broken6.test",false);
             boolean blocked=false;
             try(Socket socket=new Socket()) {

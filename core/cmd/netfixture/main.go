@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -27,6 +28,7 @@ func main() {
 	bad6 := flag.String("bad6", "2001:db8:2::3", "unreachable AAAA address")
 	listen4 := flag.String("listen4", "0.0.0.0", "IPv4 bind address")
 	listen6 := flag.String("listen6", "::", "IPv6 bind address")
+	supplementFixture := flag.Bool("supplement-fixture", false, "serve blocked and transport-dependent supplemental DNS")
 	flag.Parse()
 	var hits4, hits6 atomic.Int64
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -50,6 +52,11 @@ func main() {
 				hits4.Add(1)
 			} else {
 				hits6.Add(1)
+			}
+			if r.URL.Path == "/video" {
+				for range 8192 {
+					fmt.Fprint(w, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+				}
 			}
 			fmt.Fprintln(w, "tcp"+family)
 		})
@@ -86,50 +93,68 @@ func main() {
 			}
 		}()
 	}
-	handler := dns.HandlerFunc(func(w dns.ResponseWriter, q *dns.Msg) {
-		a := new(dns.Msg)
-		a.SetReply(q)
-		a.RecursionAvailable = true
-		if len(q.Question) != 1 {
-			a.Rcode = dns.RcodeFormatError
-			w.WriteMsg(a)
-			return
-		}
-		question := q.Question[0]
-		host := question.Name
-		if host == "absent.test." {
-			a.Rcode = dns.RcodeNameError
-			w.WriteMsg(a)
-			return
-		}
-		if host == "dnsfail.test." {
-			a.Rcode = dns.RcodeServerFailure
-			w.WriteMsg(a)
-			return
-		}
-		hdr := dns.RR_Header{Name: host, Rrtype: question.Qtype, Class: dns.ClassINET, Ttl: 30}
-		switch question.Qtype {
-		case dns.TypeA:
-			if host != "v6.test." {
-				a.Answer = []dns.RR{&dns.A{Hdr: hdr, A: net.ParseIP(*v4)}}
+	makeDNSHandler := func(supplement bool) dns.HandlerFunc {
+		return func(w dns.ResponseWriter, q *dns.Msg) {
+			a := new(dns.Msg)
+			a.SetReply(q)
+			a.RecursionAvailable = true
+			if len(q.Question) != 1 {
+				a.Rcode = dns.RcodeFormatError
+				w.WriteMsg(a)
+				return
 			}
-		case dns.TypeAAAA:
-			if host != "v4.test." {
-				ip := *v6
-				if host == "broken6.test." {
-					ip = *bad6
+			question := q.Question[0]
+			host := question.Name
+			if host == "absent.test." {
+				a.Rcode = dns.RcodeNameError
+				w.WriteMsg(a)
+				return
+			}
+			if host == "dnsfail.test." {
+				a.Rcode = dns.RcodeServerFailure
+				w.WriteMsg(a)
+				return
+			}
+			hdr := dns.RR_Header{Name: host, Rrtype: question.Qtype, Class: dns.ClassINET, Ttl: 30}
+			switch question.Qtype {
+			case dns.TypeA:
+				if host != "v6.test." {
+					a.Answer = []dns.RR{&dns.A{Hdr: hdr, A: net.ParseIP(*v4)}}
 				}
-				a.Answer = []dns.RR{&dns.AAAA{Hdr: hdr, AAAA: net.ParseIP(ip)}}
+			case dns.TypeAAAA:
+				if host != "v4.test." && (!strings.HasPrefix(host, "supplement-") || (supplement && w.RemoteAddr().Network() == "tcp")) {
+					ip := *v6
+					if host == "broken6.test." {
+						ip = *bad6
+					}
+					a.Answer = []dns.RR{&dns.AAAA{Hdr: hdr, AAAA: net.ParseIP(ip)}}
+				}
 			}
+			w.WriteMsg(a)
 		}
-		w.WriteMsg(a)
-	})
+	}
+	handler := makeDNSHandler(false)
 	udp, err := net.ListenPacket("udp4", net.JoinHostPort(*listen4, "15353"))
 	must(err)
 	tcp, err := net.Listen("tcp4", net.JoinHostPort(*listen4, "15353"))
 	must(err)
 	go (&dns.Server{PacketConn: udp, Handler: handler}).ActivateAndServe()
 	go (&dns.Server{Listener: tcp, Handler: handler}).ActivateAndServe()
+	if *supplementFixture {
+		blockedUDP, e := net.ListenPacket("udp6", net.JoinHostPort(*listen6, "15354"))
+		must(e)
+		blockedTCP, e := net.Listen("tcp6", net.JoinHostPort(*listen6, "15354"))
+		must(e)
+		drop := dns.HandlerFunc(func(dns.ResponseWriter, *dns.Msg) {})
+		go (&dns.Server{PacketConn: blockedUDP, Handler: drop}).ActivateAndServe()
+		go (&dns.Server{Listener: blockedTCP, Handler: drop}).ActivateAndServe()
+		publicUDP, e := net.ListenPacket("udp4", net.JoinHostPort(*listen4, "15355"))
+		must(e)
+		publicTCP, e := net.Listen("tcp4", net.JoinHostPort(*listen4, "15355"))
+		must(e)
+		go (&dns.Server{PacketConn: publicUDP, Handler: makeDNSHandler(true)}).ActivateAndServe()
+		go (&dns.Server{Listener: publicTCP, Handler: makeDNSHandler(true)}).ActivateAndServe()
+	}
 	fmt.Println("fixture ready")
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
