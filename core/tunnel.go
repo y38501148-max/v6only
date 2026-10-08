@@ -20,9 +20,10 @@ import (
 )
 
 type Tunnel struct {
-	Device device.Device
-	Stack  *stack.Stack
-	Router *Router
+	Device    device.Device
+	Stack     *stack.Stack
+	Router    *Router
+	closeOnce sync.Once
 }
 
 func (r *Router) StartDevice(name string, fd int) (*Tunnel, error) {
@@ -44,18 +45,20 @@ func (r *Router) StartDevice(name string, fd int) (*Tunnel, error) {
 		d.Close()
 		return nil, e
 	}
-	return &Tunnel{d, s, r}, nil
+	return &Tunnel{Device: d, Stack: s, Router: r}, nil
 }
 func (t *Tunnel) Close() {
-	t.Router.Close()
-	// fdbased.Close only closes a descriptor; an epoll/read worker can still be
-	// waiting on the duplicated Android TUN file description. Detach first so
-	// gVisor signals its stop event before the fd number can be reused.
-	t.Device.Attach(nil)
-	t.Device.Close()
-	t.Stack.Close()
-	t.Stack.Wait()
+	t.closeOnce.Do(func() {
+		t.Router.Close()
+		// Stop link workers before the descriptor can be reused. Stack.Wait
+		// removes the NIC and closes its link endpoint, so do not close the
+		// device separately: a second close can hit an unrelated reused fd.
+		t.Device.Attach(nil)
+		t.Stack.Close()
+		t.Stack.Wait()
+	})
 }
+
 func (r *Router) HandleTCP(c adapter.TCPConn) {
 	if r.track(c) {
 		go r.tcp(c)
