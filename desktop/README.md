@@ -24,7 +24,7 @@ SQLite 数据库位于 `/var/db/v6only/traffic.sqlite`，后台按秒存储、WA
 
 ```sh
 cd core
-go build -trimpath -ldflags='-s -w -X main.version=2.0.3' -o ../macos/v6core ./cmd/v6core
+go build -trimpath -ldflags='-s -w -X main.version=2.1.0' -o ../macos/v6core ./cmd/v6core
 go build -trimpath -ldflags='-s -w' -o ../macos/v6service ./cmd/v6service
 cd ..
 cp macos/v6core macos/v6service macos/*.sh macos/anchor-v6only desktop/src-tauri/resources/macos/

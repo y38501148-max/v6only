@@ -6,7 +6,7 @@ IPv6 转发与流量记录工具，提供 macOS、Android 和 Windows 桌面/移
 
 | 平台 | 安装包 | 支持范围 |
 | --- | --- | --- |
-| macOS | DMG | Apple Silicon，macOS 12+ |
+| macOS | DMG | Apple Silicon，macOS 12+；当前控制器面向 BUAA 校园 Wi-Fi/en0 |
 | Android | APK | Android 10+，arm64-v8a / x86_64 |
 | Windows | MSI | Windows 10 1903+ / Windows 11，x64 |
 

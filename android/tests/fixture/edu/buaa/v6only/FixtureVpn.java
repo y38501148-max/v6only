@@ -13,10 +13,11 @@ public class FixtureVpn extends V6VpnService {
 
     private Network physical;
     public static volatile String failure = "";
+    public static volatile boolean ready;
     @Override public int onStartCommand(Intent intent, int flags, int id) {
         startForeground(2,new Notification.Builder(this,"v6only").setContentTitle("Disposable emulator test")
                 .setSmallIcon(android.R.drawable.ic_lock_lock).build());
-        if ("stop".equals(intent.getAction())) {closeTun();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();return START_NOT_STICKY;}
+        if ("stop".equals(intent.getAction())) {ready=false;closeTun();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();return START_NOT_STICKY;}
         if (!android.os.Build.HARDWARE.contains("ranchu") && !android.os.Build.HARDWARE.contains("goldfish"))
             throw new IllegalStateException("Fixture service requires an emulator");
         try {
@@ -31,6 +32,7 @@ public class FixtureVpn extends V6VpnService {
             if(physical==null)throw new IOException("No physical network");
             android.util.Log.i("FixtureVpn","Physical network "+physical+" "+cm.getLinkProperties(physical));
             establishTunnel(physical, java.util.Collections.singletonList("10.0.2.2:15353"), false);
+            ready=true; android.util.Log.i("FixtureVpn","Native stack ready");
         }catch(Exception e){failure=e.toString();android.util.Log.e("FixtureVpn",failure,e);closeTun();stopSelf();}
         return START_NOT_STICKY;
     }

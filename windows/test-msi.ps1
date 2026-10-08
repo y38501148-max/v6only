@@ -10,9 +10,11 @@ function RPC($request){
  try{$pipe.Connect(10000);$writer=[IO.StreamWriter]::new($pipe,[Text.UTF8Encoding]::new($false),4096,$true);$writer.AutoFlush=$true;$writer.WriteLine(($request|ConvertTo-Json -Compress));$reader=[IO.StreamReader]::new($pipe);$reply=$reader.ReadLine()|ConvertFrom-Json;if(!$reply.ok){throw $reply.error};return $reply.data}finally{$pipe.Dispose()}
 }
 try{
+ Write-Host 'CHECK: install MSI'
  $p=Start-Process msiexec.exe -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v `"$out/install.log`"" -Wait -PassThru
  if($p.ExitCode -notin @(0,3010)){throw "MSI install failed: $($p.ExitCode)"}
  $service=Get-Service V6Only;if($service.Status -ne 'Running'){throw 'Installed service is not running'}
+ Write-Host 'CHECK: initial service status'
  RPC @{action='status'}|ConvertTo-Json -Depth 12|Set-Content "$out/status.json"
  $bad=$false;try{RPC @{action='arbitrary-shell';url='whoami'}}catch{$bad=$true};if(!$bad){throw 'RPC allowlist missing'}
  $installed=Join-Path $env:ProgramFiles 'V6Only'
@@ -21,6 +23,7 @@ try{
  $app=Start-Process $gui.FullName -PassThru;Start-Sleep 5;if($app.HasExited){throw 'Desktop GUI exited during launch'};Stop-Process $app.Id -Force
  # Exercise actual Wintun global capture. Hosted VM has no external IPv6;
  # successful connection to a literal IPv4 proves the v4-only path remains usable.
+ Write-Host 'CHECK: enable forwarding'
  RPC @{action='enable'}|ConvertTo-Json -Depth 12|Set-Content "$out/enabled.json"
  if(!(RPC @{action='status'}).enabled){throw 'Network controller did not enable'}
  & curl.exe --noproxy '*' -fsS --max-time 20 http://1.1.1.1/ -o NUL
@@ -29,12 +32,15 @@ try{
  $stats=RPC @{action='stats';from=0;to=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+1}
  if(($stats.v4_up+$stats.v4_down) -le 0){throw 'Traffic counters were not persisted'}
  $stats|ConvertTo-Json -Depth 12|Set-Content "$out/stats.json"
+ Write-Host 'CHECK: disable and persisted history'
  RPC @{action='disable'}|Out-Null
  $saved=$stats.v4_up+$stats.v4_down
  if(((RPC @{action='stats';from=0;to=[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()+1}).v4_up) -lt $stats.v4_up){throw 'Stopped history disappeared'}
  # Uninstall while active to verify service-stop cleanup as well as service removal.
  RPC @{action='enable'}|Out-Null
 }finally{
+ Write-Host 'CHECK: uninstall and restore network'
+ Copy-Item "$env:ProgramData/v6only/*.log" $out -ErrorAction SilentlyContinue
  $p=Start-Process msiexec.exe -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart /l*v `"$out/uninstall.log`"" -Wait -PassThru
  if($p.ExitCode -notin @(0,3010)){throw "MSI uninstall failed: $($p.ExitCode)"}
 }

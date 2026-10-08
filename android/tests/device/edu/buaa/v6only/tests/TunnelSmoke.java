@@ -26,9 +26,10 @@ public class TunnelSmoke extends Instrumentation {
             Activity activity=startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             command("start");
             ConnectivityManager cm=context.getSystemService(ConnectivityManager.class);
-            await(()->isVpn(cm),"VPN default network");
+            await(()->isVpn(cm) && nativeReady(),"VPN and native stack ready");
             Network vpn=cm.getActiveNetwork();
             for(String[] item:new String[][]{{"dual.test","6"},{"v4.test","4"},{"v6.test","6"},{"chatgpt.com","4"}}){
+                status("Checking "+item[0]+" UDP DNS");
                 String ip=query(vpn,item[0],false);
                 check(ip.equals(query(vpn,item[0],true)),"UDP/TCP DNS agree");
                 try(Socket socket=new Socket()){
@@ -73,8 +74,9 @@ public class TunnelSmoke extends Instrumentation {
             status("PASS stopped VPN restores physical connectivity");
             runOnMainSync(activity::finishAndRemoveTask);
             result.putString("stream","\nPASS: Android native tunnel integration\n");finish(Activity.RESULT_OK,result);
-        }catch(Throwable e){if(context!=null)command("stop");result.putString("stream","\nFAIL: "+android.util.Log.getStackTraceString(e));finish(Activity.RESULT_CANCELED,result);}
+        }catch(Throwable e){status("Native flows at failure: "+CoreNative.flows());if(context!=null)command("stop");result.putString("stream","\nFAIL: "+android.util.Log.getStackTraceString(e));finish(Activity.RESULT_CANCELED,result);}
     }
+    private boolean nativeReady(){try{return Class.forName("edu.buaa.v6only.FixtureVpn").getField("ready").getBoolean(null);}catch(Exception e){return false;}}
     private boolean isVpn(ConnectivityManager cm){Network n=cm.getActiveNetwork();NetworkCapabilities c=n==null?null:cm.getNetworkCapabilities(n);return c!=null&&c.hasTransport(NetworkCapabilities.TRANSPORT_VPN);}
     private void command(String action){runOnMainSync(()->context.startForegroundService(new Intent().setClassName(context.getPackageName(),"edu.buaa.v6only.FixtureVpn").setAction(action)));}
     private String query(Network vpn,String host,boolean tcp)throws Exception{
