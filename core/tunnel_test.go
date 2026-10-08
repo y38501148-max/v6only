@@ -21,11 +21,12 @@ var _ device.Device = (*countedDevice)(nil)
 
 func TestTunnelReleasesDeviceOnce(t *testing.T) {
 	d := &countedDevice{Endpoint: channel.New(16, 1500, "")}
+	owned := &ownedDevice{Device: d}
 	s := stack.New(stack.Options{})
-	if e := s.CreateNIC(1, d); e != nil {
+	if e := s.CreateNIC(1, owned); e != nil {
 		t.Fatal(e)
 	}
-	tunnel := &Tunnel{Device: d, Stack: s, Router: New(Config{}, nil)}
+	tunnel := &Tunnel{Device: owned, Stack: s, Router: New(Config{}, nil)}
 	tunnel.Close()
 	tunnel.Close()
 	if n := d.closes.Load(); n != 1 {

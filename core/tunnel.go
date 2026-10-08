@@ -26,6 +26,15 @@ type Tunnel struct {
 	closeOnce sync.Once
 }
 
+// ownedDevice permits both explicit shutdown and stack NIC removal to close
+// the link safely. Drivers such as fdbased.Close are not themselves idempotent.
+type ownedDevice struct {
+	device.Device
+	once sync.Once
+}
+
+func (d *ownedDevice) Close() { d.once.Do(d.Device.Close) }
+
 func (r *Router) StartDevice(name string, fd int) (*Tunnel, error) {
 	var d device.Device
 	var e error
@@ -40,6 +49,7 @@ func (r *Router) StartDevice(name string, fd int) (*Tunnel, error) {
 	if e != nil {
 		return nil, e
 	}
+	d = &ownedDevice{Device: d}
 	s, e := tcore.CreateStack(&tcore.Config{LinkEndpoint: d, TransportHandler: r})
 	if e != nil {
 		d.Close()
@@ -50,10 +60,11 @@ func (r *Router) StartDevice(name string, fd int) (*Tunnel, error) {
 func (t *Tunnel) Close() {
 	t.closeOnce.Do(func() {
 		t.Router.Close()
-		// Stop link workers before the descriptor can be reused. Stack.Wait
-		// removes the NIC and closes its link endpoint, so do not close the
-		// device separately: a second close can hit an unrelated reused fd.
+		// Stop readers before closing their descriptor. Explicit close unblocks
+		// the macOS/Windows IO reader; NIC removal then closes the same owned
+		// device safely without touching a descriptor that has been reused.
 		t.Device.Attach(nil)
+		t.Device.Close()
 		t.Stack.Close()
 		t.Stack.Wait()
 	})
