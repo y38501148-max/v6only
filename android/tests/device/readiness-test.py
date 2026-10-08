@@ -29,7 +29,12 @@ def wait(predicate, label):
 
 
 def vpn():
-    return 'ni{VPN CONNECTED extra: VPN:edu.buaa.v6only' in shell('dumpsys', 'connectivity')
+    # NetworkInfo's dumpsys format differs before Android 12. Match only a
+    # connected network with our tunnel address, not historical request logs.
+    return any('NetworkAgentInfo{' in line and '198.18.0.1/15' in line
+               and ('ni{VPN CONNECTED' in line
+                    or 'type: VPN[], state: CONNECTED/CONNECTED' in line)
+               for line in shell('dumpsys', 'connectivity').splitlines())
 
 
 def command(action):
@@ -52,7 +57,6 @@ assert shell('id', '-u') == '0', 'Rootable emulator required'
 server = http.server.HTTPServer(('127.0.0.1', 18766), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 address = '2001:db8:10::22/64'
-added_route = False
 try:
     # StartupSmoke persists global/automatic mode; no test-only VPN service is used.
     out = shell('am', 'instrument', '-w', 'edu.buaa.v6only.tests/.StartupSmoke')
@@ -63,13 +67,6 @@ try:
     for iteration in range(2):
         # nodad keeps this synthetic address out of Android's tentative-address cache.
         shell('ip', '-6', 'addr', 'add', address, 'dev', 'wlan0', 'nodad')
-        # Android 10 images can expose only a connected IPv6 subnet on Wi-Fi.
-        # Supply the fixture's default route too: an address alone is deliberately
-        # insufficient for the production readiness guard.
-        routes = shell('ip', '-6', 'route', 'show', 'table', 'all')
-        if not any(line.startswith('default ') and 'dev wlan0' in line for line in routes.splitlines()):
-            shell('ip', '-6', 'route', 'add', 'default', 'via', 'fe80::2', 'dev', 'wlan0')
-            added_route = True
         wait(vpn, 'IPv6 recovery establishes production VPN')
         shell('ip', '-6', 'addr', 'del', address, 'dev', 'wlan0')
         wait(lambda: not vpn(), 'IPv6 address loss releases VPN routes')
@@ -85,8 +82,6 @@ except BaseException:
     print(shell('logcat', '-d', '-s', 'V6VpnService'), flush=True)
     raise
 finally:
-    if added_route:
-        subprocess.run(ADB + ['shell', 'ip', '-6', 'route', 'del', 'default', 'via', 'fe80::2', 'dev', 'wlan0'], capture_output=True)
     subprocess.run(ADB + ['shell', 'ip', '-6', 'addr', 'del', address, 'dev', 'wlan0'], capture_output=True)
     command('STOP')
     server.shutdown()
