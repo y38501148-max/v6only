@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '../core')
 try {
     $version=(Get-Content "$PSScriptRoot/../VERSION" -Raw).Trim()

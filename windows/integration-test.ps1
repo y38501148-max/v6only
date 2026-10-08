@@ -1,4 +1,4 @@
-# Actual Wintun tests, strictly restricted to disposable GitHub-hosted Windows VMs.
+﻿# Actual Wintun tests, strictly restricted to disposable GitHub-hosted Windows VMs.
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
     throw 'Refusing to change networking outside a disposable GitHub-hosted Windows VM.'

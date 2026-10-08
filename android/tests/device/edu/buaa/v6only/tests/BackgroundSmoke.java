@@ -15,7 +15,7 @@ import java.io.FileOutputStream;
 
 public final class BackgroundSmoke extends Instrumentation {
  private String label;
- @Override public void onCreate(Bundle args){super.onCreate(args);label=args==null?"自启动与后台管理":args.getString("action","自启动与后台管理");start();}
+ @Override public void onCreate(Bundle args){super.onCreate(args);label=args==null?"自启动与后台管理":args.getString("action","自启动与后台管理");if(label.equals("vpn"))label="始终开启 VPN";if(label.equals("app"))label="应用设置";start();}
  @Override public void onStart(){Bundle result=new Bundle();try{
   {
    Activity a=startActivitySync(new Intent(getTargetContext(),BackgroundSettingsActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));waitForIdleSync();SystemClock.sleep(300);

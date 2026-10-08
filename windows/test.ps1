@@ -1,4 +1,4 @@
-# Pure policy + controller regression tests with mocked Windows APIs.
+﻿# Pure policy + controller regression tests with mocked Windows APIs.
 $ErrorActionPreference = 'Stop'
 $source = Join-Path $PSScriptRoot 'v6only.ps1'
 $errors = $null

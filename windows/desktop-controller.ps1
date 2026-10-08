@@ -1,4 +1,4 @@
-param([ValidateSet('status','enable','disable','watch','stop')][string]$Action='status')
+﻿param([ValidateSet('status','enable','disable','watch','stop')][string]$Action='status')
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 # Load the controller without invoking its CLI entry point.

@@ -1,4 +1,4 @@
-$ErrorActionPreference='Stop'
+﻿$ErrorActionPreference='Stop'
 if($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted'){throw 'Disposable GitHub Windows VM required'}
 $out=Join-Path $PSScriptRoot '../build/msi-test';New-Item -ItemType Directory -Force $out|Out-Null
 $msi=Get-ChildItem "$PSScriptRoot/../desktop/src-tauri/target/release/bundle/msi/*.msi"|Select-Object -First 1
