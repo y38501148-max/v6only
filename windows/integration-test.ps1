@@ -37,7 +37,12 @@ function Start-Core([string]$Dns, [bool]$Fake) {
     if (-not (Test-Path $ready)) { throw 'Core readiness timeout' }
     $tun=$null
     for($attempt=0;$attempt -lt 40;$attempt++){
-        try{$tun=Get-NetAdapter -Name 'v6only-ci' -ErrorAction Stop;break}catch{Start-Sleep -Milliseconds 250}
+        try{
+            $candidate=Get-NetAdapter -Name 'v6only-ci' -ErrorAction Stop
+            $interfaces=@(Get-NetIPInterface -InterfaceIndex $candidate.ifIndex -ErrorAction Stop)
+            if($candidate.Status -eq 'Up' -and @($interfaces|Where-Object AddressFamily -in @('IPv4','IPv6')).Count -ge 2){$tun=$candidate;break}
+        }catch{}
+        Start-Sleep -Milliseconds 250
     }
     if(!$tun){throw 'Forwarding adapter not registered after driver start'}
     Set-NetIPInterface -InterfaceIndex $tun.ifIndex -AddressFamily IPv4 -Dhcp Disabled

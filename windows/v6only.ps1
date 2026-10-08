@@ -98,7 +98,11 @@ function Wait-ForwardingAdapter([string]$Name) {
     # Driver readiness precedes WMI registration; the previous adapter's
     # registry key may still be pending deletion during a quick restart.
     for ($attempt=0; $attempt -lt 40; $attempt++) {
-        try { return Get-NetAdapter -Name $Name -ErrorAction Stop }
+        try {
+            $adapter=Get-NetAdapter -Name $Name -ErrorAction Stop
+            $interfaces=@(Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -ErrorAction Stop)
+            if($adapter.Status -eq 'Up' -and @($interfaces|Where-Object AddressFamily -in @('IPv4','IPv6')).Count -ge 2){return $adapter}
+        }
         catch { Start-Sleep -Milliseconds 250 }
     }
     throw "Forwarding adapter $Name is unavailable after driver start"
