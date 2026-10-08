@@ -5,6 +5,9 @@ $msi=Get-ChildItem "$PSScriptRoot/../desktop/src-tauri/target/release/bundle/msi
 if(!$msi){throw 'No MSI generated'}
 $baselineIndexes=@((Get-NetAdapter|Where-Object HardwareInterface).ifIndex)
 $baseline=@(Get-DnsClientServerAddress|Where-Object InterfaceIndex -in $baselineIndexes|Select-Object InterfaceIndex,AddressFamily,ServerAddresses)|ConvertTo-Json -Depth 5 -Compress
+$baseline | Set-Content "$out/baseline.json"
+Remove-Item "$out/watchdog.done","$out/watchdog-restored.flag" -ErrorAction SilentlyContinue
+$watchdog=Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot/test-msi-watchdog.ps1`" -Out `"$out`"" -WindowStyle Hidden -PassThru
 function RPC($request){
  $pipe=[IO.Pipes.NamedPipeClientStream]::new('.','v6only-desktop',[IO.Pipes.PipeDirection]::InOut)
  try{$pipe.Connect(10000);$writer=[IO.StreamWriter]::new($pipe,[Text.UTF8Encoding]::new($false),4096,$true);$writer.AutoFlush=$true;$writer.WriteLine(($request|ConvertTo-Json -Compress));$reader=[IO.StreamReader]::new($pipe);$reply=$reader.ReadLine()|ConvertFrom-Json;if(!$reply.ok){throw $reply.error};return $reply.data}finally{$pipe.Dispose()}
@@ -44,6 +47,8 @@ try{
  $p=Start-Process msiexec.exe -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart /l*v `"$out/uninstall.log`"" -Wait -PassThru
  if($p.ExitCode -notin @(0,3010)){throw "MSI uninstall failed: $($p.ExitCode)"}
 }
+New-Item -ItemType File "$out/watchdog.done" -Force|Out-Null
+if(Test-Path "$out/watchdog-restored.flag"){throw 'Independent watchdog restored networking after test stalled'}
 if(Get-Service V6Only -ErrorAction SilentlyContinue){throw 'Service left behind after uninstall'}
 $after=@(Get-DnsClientServerAddress|Where-Object InterfaceIndex -in $baselineIndexes|Select-Object InterfaceIndex,AddressFamily,ServerAddresses)|ConvertTo-Json -Depth 5 -Compress
 if($baseline -ne $after){throw 'DNS was not restored after uninstall'}
