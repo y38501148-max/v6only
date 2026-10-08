@@ -31,7 +31,7 @@ public final class CellularSmoke extends Instrumentation {
             context = getTargetContext();
             cm = context.getSystemService(ConnectivityManager.class);
             prefs = context.getSharedPreferences("v6only", Context.MODE_PRIVATE);
-            prefs.edit().putBoolean("enabled", false).putBoolean("auto", true).commit();
+            prefs.edit().putBoolean("campus_only", true).putBoolean("enabled", false).putBoolean("auto", true).commit();
             // Fresh CI emulators may still be registering the modem. This wait is
             // before starting the app; service behavior keeps the shorter timeout.
             await(this::cellularDefault, "real cellular default network", 60000);

@@ -9,6 +9,6 @@ for ABI in ${V6ONLY_ANDROID_ABIS:-arm64-v8a x86_64}; do
  CC_PATH="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin/${TARGET}29-clang"
  [[ -x "$CC_PATH" ]] || { echo "Missing NDK compiler: $CC_PATH" >&2; exit 1; }
  mkdir -p "$PROJ/build/apk/lib/$ABI"
- (cd "$PROJ/../core" && CGO_ENABLED=1 GOOS=android GOARCH="$ARCH" CC="$CC_PATH" go build -trimpath -ldflags='-s -w' -buildmode=c-shared -o "$PROJ/build/apk/lib/$ABI/libv6core.so" ./mobile)
+ (cd "$PROJ/../core" && CGO_ENABLED=1 GOOS=android GOARCH="$ARCH" CC="$CC_PATH" CGO_LDFLAGS='-Wl,-z,max-page-size=16384' go build -trimpath -ldflags='-s -w' -buildmode=c-shared -o "$PROJ/build/apk/lib/$ABI/libv6core.so" ./mobile)
  rm -f "$PROJ/build/apk/lib/$ABI/libv6core.h"
 done

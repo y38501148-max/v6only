@@ -6,4 +6,5 @@ public final class CoreNative {
     public static synchronized native String start(int fd, String config, V6VpnService owner);
     public static synchronized native void stop();
     public static synchronized native String flows();
+    public static synchronized native String stats(String path, long from, long to);
 }

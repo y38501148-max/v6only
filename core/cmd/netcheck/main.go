@@ -32,7 +32,7 @@ func main() {
 		}
 		return a.Answer[0].(*dns.A).A.String()
 	}
-	for _, item := range []struct{ host, want string }{{"dual.test", "6"}, {"v4.test", "4"}, {"broken6.test", "4"}, {"v6.test", "6"}} {
+	for _, item := range []struct{ host, want string }{{"dual.test", "6"}, {"v4.test", "4"}, {"v6.test", "6"}} {
 		ip := resolve(item.host, "udp")
 		if ip != resolve(item.host, "tcp") {
 			panic("DNS transports disagree")

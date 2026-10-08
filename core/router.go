@@ -1,4 +1,4 @@
-// Package v6core implements strict IPv6-before-IPv4 forwarding.
+// Package v6core implements IPv6-only forwarding for every domain with AAAA records.
 package v6core
 
 import (
@@ -19,17 +19,24 @@ import (
 
 type Config struct {
 	DNS             []string `json:"dns"`
+	IPv6DNS         []string `json:"ipv6_dns,omitempty"`
+	ChatGPTProxy    string   `json:"chatgpt_proxy,omitempty"`
+	ChatGPTIPv4     bool     `json:"chatgpt_ipv4,omitempty"`
+	StatsDB         string   `json:"stats_db,omitempty"`
 	Interface       string   `json:"interface"`
 	FamilyTimeoutMS int      `json:"family_timeout_ms"`
 	FakeDNS         bool     `json:"fake_dns"`
 	Generation      int64    `json:"generation"`
 }
 type Flow struct {
-	Host    string    `json:"host"`
-	Remote  string    `json:"remote"`
-	Network string    `json:"network"`
-	Reason  string    `json:"reason"`
-	Time    time.Time `json:"time"`
+	Host          string    `json:"host"`
+	Remote        string    `json:"remote"`
+	Network       string    `json:"network"`
+	Reason        string    `json:"reason"`
+	Time          time.Time `json:"time"`
+	UploadBytes   int64     `json:"upload_bytes"`
+	DownloadBytes int64     `json:"download_bytes"`
+	counter       interface{ FlowBytes() (int64, int64) }
 }
 type Result struct {
 	V6, V4 []net.IP
@@ -43,7 +50,20 @@ type reverseEntry struct {
 	host  string
 	until time.Time
 }
+type dnsCached struct {
+	msg   *dns.Msg
+	err   error
+	until time.Time
+}
+type dnsPending struct {
+	done chan struct{}
+	msg  *dns.Msg
+	err  error
+}
 type Router struct {
+	queryMu        sync.Mutex
+	queryCache     map[string]dnsCached
+	queryPending   map[string]*dnsPending
 	cfg            Config
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -60,6 +80,7 @@ type Router struct {
 	Log            func(Flow)
 	LookupOverride func(context.Context, string) (Result, error)
 	DialOverride   func(context.Context, string, string) (net.Conn, error)
+	Traffic        *TrafficStore
 }
 
 func New(cfg Config, control func(string, string, syscall.RawConn) error) *Router {
@@ -67,7 +88,7 @@ func New(cfg Config, control func(string, string, syscall.RawConn) error) *Route
 		cfg.FamilyTimeoutMS = 5000
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Router{cfg: cfg, ctx: ctx, cancel: cancel, control: control, cache: map[string]cached{}, fake: map[string]string{}, reverse: map[string]reverseEntry{}, fakeReverse: map[string]string{}, next: 1, connections: map[net.Conn]bool{}}
+	return &Router{cfg: cfg, ctx: ctx, cancel: cancel, control: control, cache: map[string]cached{}, fake: map[string]string{}, reverse: map[string]reverseEntry{}, fakeReverse: map[string]string{}, next: 1, connections: map[net.Conn]bool{}, queryCache: map[string]dnsCached{}, queryPending: map[string]*dnsPending{}}
 }
 func (r *Router) Close() {
 	r.cancel()
@@ -93,11 +114,12 @@ func (r *Router) track(c net.Conn) bool {
 }
 func (r *Router) untrack(c net.Conn) { r.mu.Lock(); delete(r.connections, c); r.mu.Unlock(); c.Close() }
 func (r *Router) record(host string, c net.Conn, network, reason string) {
-	f := Flow{host, c.RemoteAddr().String(), network, reason, time.Now()}
+	f := Flow{Host: host, Remote: c.RemoteAddr().String(), Network: network, Reason: reason, Time: time.Now()}
+	f.counter, _ = c.(interface{ FlowBytes() (int64, int64) })
 	r.mu.Lock()
 	r.flows = append(r.flows, f)
-	if len(r.flows) > 128 {
-		r.flows = r.flows[len(r.flows)-128:]
+	if len(r.flows) > 512 {
+		r.flows = r.flows[len(r.flows)-512:]
 	}
 	r.mu.Unlock()
 	if r.Log != nil {
@@ -110,6 +132,9 @@ func (r *Router) Flows(host string) []Flow {
 	out := []Flow{}
 	for _, f := range r.flows {
 		if host == "" || f.Host == host {
+			if f.counter != nil {
+				f.UploadBytes, f.DownloadBytes = f.counter.FlowBytes()
+			}
 			out = append(out, f)
 		}
 	}
@@ -117,25 +142,114 @@ func (r *Router) Flows(host string) []Flow {
 }
 func (r *Router) JSONFlows(host string) string { b, _ := json.Marshal(r.Flows(host)); return string(b) }
 func (r *Router) rawDial(ctx context.Context, network, address string) (net.Conn, error) {
+	var c net.Conn
+	var e error
 	if r.DialOverride != nil {
-		return r.DialOverride(ctx, network, address)
+		c, e = r.DialOverride(ctx, network, address)
+	} else {
+		c, e = (&net.Dialer{Control: r.control}).DialContext(ctx, network, address)
 	}
-	d := net.Dialer{Control: r.control}
-	return d.DialContext(ctx, network, address)
+	if e == nil && r.Traffic != nil {
+		c = r.Traffic.Wrap(c)
+	}
+	return c, e
 }
 func (r *Router) query(ctx context.Context, host string, qtype uint16) (*dns.Msg, error) {
-	if len(r.cfg.DNS) == 0 {
+	key := fmt.Sprintf("%s/%d", strings.ToLower(strings.TrimSuffix(host, ".")), qtype)
+	r.queryMu.Lock()
+	if cached, ok := r.queryCache[key]; ok && time.Now().Before(cached.until) {
+		r.queryMu.Unlock()
+		if cached.msg != nil {
+			return cached.msg.Copy(), cached.err
+		}
+		return nil, cached.err
+	}
+	if pending := r.queryPending[key]; pending != nil {
+		r.queryMu.Unlock()
+		select {
+		case <-pending.done:
+			if pending.msg != nil {
+				return pending.msg.Copy(), pending.err
+			}
+			return nil, pending.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	pending := &dnsPending{done: make(chan struct{})}
+	r.queryPending[key] = pending
+	r.queryMu.Unlock()
+	msg, e := r.queryOnce(ctx, host, qtype)
+	ttl := time.Second
+	if e == nil {
+		ttl = 30 * time.Second
+		for _, rr := range append(append([]dns.RR{}, msg.Answer...), msg.Ns...) {
+			v := time.Duration(rr.Header().Ttl) * time.Second
+			if v < ttl {
+				ttl = v
+			}
+		}
+		if ttl < time.Second {
+			ttl = time.Second
+		}
+	}
+	r.queryMu.Lock()
+	if len(r.queryCache) > 8192 {
+		r.queryCache = map[string]dnsCached{}
+	}
+	r.queryCache[key] = dnsCached{msg: msg, err: e, until: time.Now().Add(ttl)}
+	pending.msg = msg
+	pending.err = e
+	delete(r.queryPending, key)
+	close(pending.done)
+	r.queryMu.Unlock()
+	if msg != nil {
+		return msg.Copy(), e
+	}
+	return nil, e
+}
+func (r *Router) queryOnce(ctx context.Context, host string, qtype uint16) (*dns.Msg, error) {
+	if qtype == dns.TypeAAAA && (r.cfg.ChatGPTProxy != "" || r.cfg.ChatGPTIPv4) && isChatGPT(host) {
+		q := new(dns.Msg)
+		q.SetQuestion(dns.Fqdn(host), qtype)
+		a := new(dns.Msg)
+		a.SetReply(q)
+		return a, nil
+	}
+	normalized := strings.ToLower(strings.TrimSuffix(host, "."))
+	campusHost := normalized == "buaa.edu.cn" || strings.HasSuffix(normalized, ".buaa.edu.cn") || strings.HasSuffix(normalized, ".local")
+	if qtype == dns.TypeAAAA && len(r.cfg.IPv6DNS) > 0 && !campusHost {
+		campus, e := r.queryServers(ctx, host, qtype, r.cfg.DNS, false)
+		if e == nil {
+			for _, rr := range campus.Answer {
+				if _, ok := rr.(*dns.AAAA); ok {
+					return campus, nil
+				}
+			}
+		}
+		// NODATA from campus DNS is rechecked over IPv6, never treated as
+		// proof of an IPv4-only public CDN without this second lookup.
+		return r.queryServers(ctx, host, qtype, r.cfg.IPv6DNS, true)
+	}
+	return r.queryServers(ctx, host, qtype, r.cfg.DNS, false)
+}
+func (r *Router) queryServers(ctx context.Context, host string, qtype uint16, servers []string, publicIPv6 bool) (*dns.Msg, error) {
+	if len(servers) == 0 {
 		return nil, errors.New("no physical DNS servers configured")
 	}
 	var last error
-	for _, server := range r.cfg.DNS {
+	for _, server := range servers {
 		if _, _, e := net.SplitHostPort(server); e != nil {
 			server = net.JoinHostPort(server, "53")
 		}
 		q := new(dns.Msg)
 		q.SetQuestion(dns.Fqdn(host), qtype)
 		q.SetEdns0(1232, false)
-		for _, proto := range []string{"udp", "tcp"} {
+		protocols := []string{"udp", "tcp"}
+		if publicIPv6 {
+			protocols = []string{"tcp", "udp"}
+		}
+		for _, proto := range protocols {
 			sub, cancel := context.WithTimeout(ctx, 2*time.Second)
 			c, e := r.rawDial(sub, proto, server)
 			if e == nil {
@@ -160,7 +274,7 @@ func (r *Router) query(ctx context.Context, host string, qtype uint16) (*dns.Msg
 			}
 			cancel()
 			last = e
-			break
+			// A UDP timeout must still try TCP (and vice versa).
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -334,30 +448,44 @@ func (r *Router) family(ctx context.Context, ips []net.IP, port, network string)
 	return nil, last
 }
 func (r *Router) Dial(ctx context.Context, host, port string) (net.Conn, error) {
+	if r.cfg.ChatGPTProxy != "" && isChatGPT(host) {
+		return r.dialChatGPT(ctx, host, port)
+	}
+	if r.cfg.ChatGPTIPv4 && isChatGPT(host) {
+		addresses, e := r.addresses(ctx, host)
+		if e != nil {
+			return nil, e
+		}
+		c, e := r.family(ctx, addresses.V4, port, "tcp4")
+		if e == nil {
+			r.record(host, c, "tcp4", "chatgpt_ipv4")
+		}
+		return c, e
+	}
 	addresses, e := r.addresses(ctx, host)
 	if e != nil {
 		return nil, e
 	}
-	reason := "ipv6_available"
-	c, e := r.family(ctx, addresses.V6, port, "tcp6")
-	if e == nil {
-		r.record(host, c, "tcp6", reason)
+	if len(addresses.V6) > 0 {
+		c, e := r.family(ctx, addresses.V6, port, "tcp6")
+		if e != nil {
+			return nil, fmt.Errorf("IPv6 required for %s; IPv4 fallback forbidden: %w", host, e)
+		}
+		r.record(host, c, "tcp6", "ipv6_required")
 		return c, nil
 	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
+	reason := "no_aaaa"
+	if net.ParseIP(host) != nil {
+		reason = "literal_ipv4"
 	}
-	if len(addresses.V6) == 0 {
-		reason = "no_aaaa"
-		if net.ParseIP(host) != nil {
-			reason = "literal_or_unidentified_ipv4"
-		}
-	} else {
-		reason = "all_ipv6_attempts_failed"
-	}
-	c, e = r.family(ctx, addresses.V4, port, "tcp4")
+	c, e := r.family(ctx, addresses.V4, port, "tcp4")
 	if e == nil {
 		r.record(host, c, "tcp4", reason)
 	}
 	return c, e
+}
+
+// Resolve returns both families without using the system proxy.
+func (r *Router) Resolve(ctx context.Context, host string) (Result, error) {
+	return r.addresses(ctx, host)
 }

@@ -94,7 +94,7 @@ func TestIPv4Only(t *testing.T) {
 		t.Fatal(*calls)
 	}
 }
-func TestFallbackAfterAllIPv6Failures(t *testing.T) {
+func TestNoFallbackAfterAllIPv6Failures(t *testing.T) {
 	r, _ := fixture(t, dual())
 	calls := []string{}
 	r.DialOverride = func(ctx context.Context, n, a string) (net.Conn, error) {
@@ -106,12 +106,11 @@ func TestFallbackAfterAllIPv6Failures(t *testing.T) {
 		b.Close()
 		return a1, nil
 	}
-	c, e := r.Dial(context.Background(), "broken6.test", "443")
-	if e != nil {
-		t.Fatal(e)
+	_, e := r.Dial(context.Background(), "broken6.test", "443")
+	if e == nil {
+		t.Fatal("IPv6 failure must fail closed")
 	}
-	c.Close()
-	if strings.Join(calls, ",") != "tcp6,tcp4" {
+	if strings.Join(calls, ",") != "tcp6" {
 		t.Fatal(calls)
 	}
 }
@@ -218,7 +217,7 @@ func TestUDPIPv6ActualResponse(t *testing.T) {
 		t.Fatal(string(b), r.Flows(""))
 	}
 }
-func TestUDPIPv4ActualFallback(t *testing.T) {
+func TestUDPIPv4OnlyActualResponse(t *testing.T) {
 	l, e := net.ListenPacket("udp4", "127.0.0.1:0")
 	if e != nil {
 		t.Fatal(e)
@@ -228,8 +227,8 @@ func TestUDPIPv4ActualFallback(t *testing.T) {
 	_, port, _ := net.SplitHostPort(l.LocalAddr().String())
 	r := New(Config{FamilyTimeoutMS: 300}, nil)
 	defer r.Close()
-	r.LookupOverride = func(context.Context, string) (Result, error) { return dual(), nil }
-	c, _, e := r.OpenUDP(context.Background(), "dual.test", port, []byte("v4-marker"))
+	r.LookupOverride = func(context.Context, string) (Result, error) { v := dual(); v.V6 = nil; return v, nil }
+	c, _, e := r.OpenUDP(context.Background(), "v4only.test", port, []byte("v4-marker"))
 	if e != nil {
 		t.Fatal(e)
 	}

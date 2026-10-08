@@ -22,6 +22,13 @@ def mutate():
     if s.get('fail') == name+':'+a[0]:
         s.pop('fail'); done('simulated failure',1)
 if name=='networksetup':
+    if a[0]=='-getautoproxyurl': done('URL: '+s.get('pac_url','')+'\nEnabled: '+s.get('pac_enabled','No'))
+    if a[0]=='-setautoproxyurl': mutate();s['pac_url']=a[2];s['pac_enabled']='Yes';done()
+    if a[0]=='-setautoproxystate': mutate();s['pac_enabled']='Yes' if a[2]=='on' else 'No';done()
+    kind=next((x for x in ['securewebproxy','socksfirewallproxy','webproxy'] if x in a[0]),None)
+    if kind:
+        if a[0].startswith('-get'): done('Enabled: '+s.get('proxies',{}).get(kind,'No'))
+        mutate();s.setdefault('proxies',{})[kind]='Yes' if a[2]=='on' else 'No';done()
     key='dns' if 'dnsservers' in a[0] else 'bypass'
     if a[0].startswith('-get'):
         done('\n'.join(s[key]) if s[key] else ("There aren't any DNS Servers set on Wi-Fi." if key=='dns' else "There aren't any bypass domains set on Wi-Fi."))
@@ -76,13 +83,33 @@ class MacOSControllerTests(unittest.TestCase):
     def save(self, state): self.state.write_text(json.dumps(state))
     def read(self): return json.loads(self.state.read_text())
     def script(self, body, source='v6ctl.sh', ok=True):
-        code=f'source "{ROOT}/macos/{source}"\nrequire_root() {{ :; }}\ncore_active() {{ [[ -f \"$STATE_DIR/fake-core\" ]]; }}\nstart_core() {{ touch \"$STATE_DIR/fake-core\"; }}\nstop_core() {{ rm -f \"$STATE_DIR/fake-core\"; }}\nvalidate_forwarding() {{ [[ ${{FAKE_FORWARD_FAIL:-0}} != 1 ]]; }}\nrules_signature() {{ printf mock; }}\n'+body
+        code=f'source "{ROOT}/macos/{source}"\nrequire_root() {{ :; }}\ncore_active() {{ [[ -f \"$STATE_DIR/fake-core\" ]]; }}\nstart_core() {{ touch \"$STATE_DIR/fake-core\"; }}\nstop_core() {{ rm -f \"$STATE_DIR/fake-core\"; }}\nvalidate_forwarding() {{ [[ ${{FAKE_FORWARD_FAIL:-0}} != 1 ]]; }}\ncore_network_matches() {{ :; }}\nrules_signature() {{ printf mock; }}\n'+body
         r=subprocess.run(['/bin/bash','-c',code],env=self.env,text=True,capture_output=True)
         if ok: self.assertEqual(r.returncode,0,r.stdout+r.stderr)
         else: self.assertNotEqual(r.returncode,0,r.stdout+r.stderr)
         return r
     def on(self,ok=True): return self.script('main on',ok=ok)
     def off(self,mode='manual'): return self.script('main off '+mode)
+
+    def test_chatgpt_pac_is_applied_and_restored(self):
+        s=self.read();s['pac_url']='http://127.0.0.1:33331/commands/pac';s['pac_enabled']='Yes';self.save(s)
+        self.on();self.assertEqual(self.read()['pac_url'],'http://127.0.0.1:17890/proxy.pac');self.assertEqual(self.read()['pac_enabled'],'Yes')
+        self.off();self.assertEqual(self.read()['pac_url'],'http://127.0.0.1:33331/commands/pac');self.assertEqual(self.read()['pac_enabled'],'Yes')
+
+    def test_disabled_pac_remains_disabled_after_restore(self):
+        self.on();self.off();self.assertEqual(self.read()['pac_enabled'],'No')
+
+    def test_system_proxy_paused_and_restored(self):
+        s=self.read();s['proxies']={'webproxy':'Yes','securewebproxy':'Yes','socksfirewallproxy':'Yes'};self.save(s)
+        self.on();self.assertEqual(set(self.read()['proxies'].values()),{'No'})
+        self.off();self.assertEqual(set(self.read()['proxies'].values()),{'Yes'})
+
+    def test_proxy_reenabled_is_detected_and_paused(self):
+        self.on()
+        s=self.read();s['proxies']['securewebproxy']='Yes';self.save(s)
+        self.script('configuration_active',ok=False)
+        self.on()
+        self.assertEqual(self.read()['proxies']['securewebproxy'],'No')
 
     def test_repeated_on_and_watcher_do_not_reapply(self):
         self.on(); count=len(self.read()['writes'])
@@ -99,7 +126,7 @@ class MacOSControllerTests(unittest.TestCase):
         self.assertEqual(resolver.read_text(),'nameserver 10.1.2.3\n')
         self.assertEqual(self.read()['main'],self.initial['main'])
         self.assertTrue(self.read()['enabled'])
-        self.assertTrue((self.base/'run/v6only.suspend').read_text().strip().isdigit())
+        self.assertEqual((self.base/'run/v6only.suspend').read_text(),'')
 
     def test_auto_off_does_not_suspend_reentry(self):
         self.on(); self.off('auto')

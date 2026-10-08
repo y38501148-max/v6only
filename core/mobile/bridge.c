@@ -39,3 +39,4 @@ JNIEXPORT jstring JNICALL Java_edu_buaa_v6only_CoreNative_start(JNIEnv *env,jcla
 }
 JNIEXPORT void JNICALL Java_edu_buaa_v6only_CoreNative_stop(JNIEnv *env,jclass cls){stopCore();release_service(env);}
 JNIEXPORT jstring JNICALL Java_edu_buaa_v6only_CoreNative_flows(JNIEnv *env,jclass cls){char *value=coreFlows();jstring result=(*env)->NewStringUTF(env,value);free(value);return result;}
+JNIEXPORT jstring JNICALL Java_edu_buaa_v6only_CoreNative_stats(JNIEnv *env,jclass cls,jstring path,jlong from,jlong to){const char *p=(*env)->GetStringUTFChars(env,path,NULL);char *value=coreStats((char*)p,from,to);(*env)->ReleaseStringUTFChars(env,path,p);jstring result=(*env)->NewStringUTF(env,value);free(value);return result;}

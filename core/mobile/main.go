@@ -24,6 +24,7 @@ import (
 
 var mu sync.Mutex
 var active *core.Tunnel
+var traffic *core.TrafficStore
 
 type androidLogger struct{}
 
@@ -63,9 +64,22 @@ func startCore(fd C.int, config *C.char) *C.char {
 		}
 		return nil
 	})
+	if cfg.StatsDB != "" {
+		traffic, e = core.OpenTraffic(cfg.StatsDB)
+		if e != nil {
+			unix.Close(copyFD)
+			r.Close()
+			return C.CString(e.Error())
+		}
+		r.Traffic = traffic
+	}
 	t, e := r.StartDevice(strconv.Itoa(copyFD), copyFD)
 	if e != nil {
 		r.Close()
+		if traffic != nil {
+			traffic.Close()
+			traffic = nil
+		}
 		return C.CString(e.Error())
 	}
 	active = t
@@ -87,6 +101,28 @@ func stopCore() {
 		active.Close()
 		active = nil
 	}
+	if traffic != nil {
+		traffic.Close()
+		traffic = nil
+	}
+}
+
+//export coreStats
+func coreStats(path *C.char, from, to C.longlong) *C.char {
+	mu.Lock()
+	defer mu.Unlock()
+	var report core.TrafficReport
+	var e error
+	if traffic != nil {
+		report, e = traffic.Report(int64(from), int64(to))
+	} else {
+		report, e = core.ReadTraffic(C.GoString(path), int64(from), int64(to))
+	}
+	if e != nil {
+		return C.CString(`{"error":"` + "暂无记录" + `"}`)
+	}
+	b, _ := json.Marshal(report)
+	return C.CString(string(b))
 }
 
 //export coreFlows

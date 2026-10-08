@@ -20,6 +20,7 @@
 [CmdletBinding(DefaultParameterSetName = 'Watch')]
 param(
     [Parameter(ParameterSetName='Watch')] [switch]$Watch,
+    [switch]$Desktop,
     [switch]$On,            # 应用 v6 优先配置
     [switch]$Off,           # 回滚（并挂起守护 30 分钟）
     [switch]$Test,          # 生效性验证
@@ -73,7 +74,7 @@ function Test-CoreActive {
         $health = Invoke-RestMethod -Uri 'http://127.0.0.1:17890/health' -TimeoutSec 2
         $tun = Get-NetAdapter -Name 'v6only-tun' -ErrorAction Stop
         $routes = @(Get-NetRoute -InterfaceIndex $tun.ifIndex -ErrorAction Stop)
-        return $health.policy -eq 'ipv6-before-ipv4' -and
+        return $health.policy -eq 'ipv6-only-unless-no-aaaa' -and
             @($routes | Where-Object DestinationPrefix -in @('0.0.0.0/1','128.0.0.0/1','::/1','8000::/1')).Count -eq 4
     } catch { return $false }
 }
@@ -100,6 +101,11 @@ function Start-V6Core($Adapter) {
     }
     Stop-V6Core
     $args = '--interface "' + $Adapter.Name + '" --device v6only-tun --dns 202.112.128.50,202.112.128.51 --ready "' + $CoreReady + '"'
+    if ($Desktop) {
+        $upstream = @($state.OriginalDns | Where-Object { $_ -ne '127.0.0.1' -and $_ -ne '::1' })
+        if (-not $upstream) { $upstream = @('223.5.5.5','223.6.6.6') }
+        $args = '--interface "' + $Adapter.Name + '" --device v6only-tun --dns ' + ($upstream -join ',') + ' --ipv6-dns 2400:3200::1,2400:3200:baba::1 --chatgpt-ipv4 --dns-listen 127.0.0.1:53 --stats-db "' + (Join-Path (Split-Path $Marker) 'traffic.sqlite') + '" --ready "' + $CoreReady + '"'
+    }
     $process = Start-Process -FilePath (Join-Path $CoreDir 'v6core.exe') -ArgumentList $args -WorkingDirectory $CoreDir -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path (Split-Path $Marker) 'core.log') -RedirectStandardError (Join-Path (Split-Path $Marker) 'core-error.log')
     @{Pid=$process.Id;StartTicks=$process.StartTime.ToUniversalTime().Ticks} | ConvertTo-Json | Set-Content $CoreState
@@ -184,14 +190,16 @@ function Test-Forwarding {
 function Invoke-V6On {
     $adapter = Get-ActiveAdapter
     $campus, $why = Test-CampusNetwork $adapter
-    if (-not $campus) {
+    if (-not $campus -and -not $Desktop) {
         if ((Test-Path $Marker) -or (Test-Path $Snapshot)) { Invoke-V6Off -Automatic }
         Write-Log 'outside campus: no configuration applied'
         return
     }
+    if (-not $adapter) { throw 'No active physical network adapter' }
+    if ($Desktop) { $script:ManagedDns = @('127.0.0.1') }
     $v6addr = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv6 -ErrorAction SilentlyContinue |
         Where-Object IPAddress -match '^[23][0-9a-fA-F]{3}:' | Select-Object -First 1
-    if (-not $v6addr) { Write-Log "no global IPv6 on $($adapter.Name)"; return }
+    if (-not $v6addr -and -not $Desktop) { Write-Log "no global IPv6 on $($adapter.Name)"; return }
     $state = if (Test-Path $Snapshot) { Get-Content $Snapshot -Raw | ConvertFrom-Json } else { $null }
     if ($state -and $state.InterfaceGuid -ne [string]$adapter.InterfaceGuid) {
         Invoke-V6Off -Automatic
@@ -234,7 +242,7 @@ function Invoke-V6On {
         }
         if ((@(Get-AdapterDns $adapter) -join ',') -ne ($ManagedDns -join ',')) { throw 'DNS readback mismatch' }
         New-Item -ItemType File -Force -Path $Marker | Out-Null
-        Test-Forwarding
+        if (-not $Desktop) { Test-Forwarding }
         Remove-Item $SuspendFlg -Force -ErrorAction SilentlyContinue
         Write-Log "campus configuration applied ($why)"
     } catch {
@@ -242,7 +250,7 @@ function Invoke-V6On {
         '' | Set-Content $SuspendFlg -Encoding UTF8
         throw
     }
-    if (-not $Watch) { Write-Host '已应用 IPv6 优先转发；IPv6 全部失败后才回退 IPv4。' }
+    if (-not $Watch) { Write-Host '转发已启用。' }
 }
 
 function Invoke-V6Off([switch]$Automatic) {

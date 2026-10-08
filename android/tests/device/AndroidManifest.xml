@@ -11,6 +11,7 @@
             <intent-filter><action android:name="android.net.VpnService"/></intent-filter>
         </service>
     </application>
+    <instrumentation android:name=".StartupSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".NetworkSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".UiSmoke" android:targetPackage="edu.buaa.v6only"/>
     <instrumentation android:name=".TunnelSmoke" android:targetPackage="edu.buaa.v6only"/>

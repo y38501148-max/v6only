@@ -11,7 +11,9 @@ public class BootReceiver extends BroadcastReceiver {
         String action = intent.getAction();
         if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
                 && !Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) return;
-        if (!context.getSharedPreferences("v6only", Context.MODE_PRIVATE).getBoolean("enabled", false)) return;
+        android.content.SharedPreferences prefs = context.getSharedPreferences("v6only", Context.MODE_PRIVATE);
+        if (!prefs.getBoolean("enabled", false) || !prefs.getBoolean("auto", true)) return;
+        if (android.net.VpnService.prepare(context) != null) return;
         try {
             context.startForegroundService(new Intent(context, V6VpnService.class)
                     .setAction(V6VpnService.ACTION_APPLY));

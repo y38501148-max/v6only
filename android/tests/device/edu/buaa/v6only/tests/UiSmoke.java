@@ -43,7 +43,7 @@ public final class UiSmoke extends Instrumentation {
             context.startForegroundService(new Intent(context, V6VpnService.class).setAction(V6VpnService.ACTION_STOP));
             await(() -> !V6VpnServiceExt.monitoring(), "initial service stop");
             SystemClock.sleep(250);
-            prefs.edit().putBoolean("enabled", false).putBoolean("auto", true).commit();
+            prefs.edit().putBoolean("campus_only", false).putBoolean("enabled", false).putBoolean("auto", true).commit();
             activity = startActivitySync(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             waitForIdleSync();
             SystemClock.sleep(400);
@@ -53,26 +53,15 @@ public final class UiSmoke extends Instrumentation {
 
             if (scenario.equals("light")) {
                 click(R.id.mode_manual);
-                check(!prefs.getBoolean("auto", true), "manual choice is persisted");
-                check(!prefs.getBoolean("enabled", false), "changing mode must not implicitly start service");
+                check(!prefs.getBoolean("auto", true), "manual startup preference persists");
+                check(!prefs.getBoolean("enabled", false), "changing startup mode does not start service");
                 click(R.id.toggle_service);
-                await(() -> text(R.id.status_title).equals("连接已开启")
-                        || text(R.id.status_title).equals("仅限校园网"), "campus boundary feedback");
-                boolean campus = V6VpnServiceExt.running(context);
-                if (campus) {
-                    check(text(R.id.toggle_service).equals("停止服务"), "stop action label");
-                    capture("connected");
-                } else {
-                    check(!prefs.getBoolean("enabled", true), "off-campus manual request is disabled");
-                    check(!V6VpnServiceExt.running(context), "off-campus manual request creates no VPN");
-                    capture("campus-only");
-                }
+                await(() -> V6VpnServiceExt.running(context), "global connection starts outside campus");
+                check(text(R.id.status_title).equals("连接已开启"), "connected feedback");
+                check(text(R.id.toggle_service).equals("停止服务"), "stop action label");
+                capture("connected");
                 click(R.id.mode_auto);
-                if (!campus) click(R.id.toggle_service);
-                await(() -> V6VpnServiceExt.monitoring() && text(R.id.status_title).equals(
-                        campus ? "连接已开启" : "等待校园网"), "automatic campus-aware feedback");
-                if (!campus) check(!V6VpnServiceExt.running(context), "off-campus automatic standby has no VPN");
-                capture(campus ? "automatic-connected" : "waiting");
+                check(prefs.getBoolean("auto", false), "automatic startup preference persists");
                 click(R.id.toggle_service);
                 await(() -> !V6VpnServiceExt.monitoring() && text(R.id.status_title).equals("连接未开启"), "explicit stop feedback");
                 check(!prefs.getBoolean("enabled", true), "stop is persisted");
@@ -120,7 +109,7 @@ public final class UiSmoke extends Instrumentation {
             checkText(content);
             float density = context.getResources().getDisplayMetrics().density;
             for (int id : new int[]{R.id.toggle_service, R.id.mode_auto, R.id.mode_manual,
-                    R.id.wifi_row, R.id.battery_row, R.id.notification_row, R.id.tips_toggle}) {
+                    R.id.traffic_history, R.id.connections, R.id.battery_row, R.id.notification_row, R.id.tips_toggle}) {
                 View target = activity.findViewById(id);
                 check(target.getHeight() >= 48 * density - 1, "minimum touch target " + id);
             }

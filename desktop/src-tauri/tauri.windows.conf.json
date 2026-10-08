@@ -1,0 +1,21 @@
+{
+  "bundle": {
+    "targets": [
+      "msi"
+    ],
+    "resources": {
+      "resources/windows/": "windows/"
+    },
+    "windows": {
+      "wix": {
+        "upgradeCode": "1AD7B987-8844-45F8-ACBB-BA5EF0DA5C27",
+        "fragmentPaths": [
+          "wix/service.wxs"
+        ],
+        "componentRefs": [
+          "V6OnlyServiceComponent"
+        ]
+      }
+    }
+  }
+}

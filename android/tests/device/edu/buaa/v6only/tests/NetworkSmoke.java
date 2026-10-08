@@ -44,7 +44,7 @@ public final class NetworkSmoke extends Instrumentation {
             context = getTargetContext();
             cm = context.getSystemService(ConnectivityManager.class);
             prefs = context.getSharedPreferences("v6only", Context.MODE_PRIVATE);
-            prefs.edit().putBoolean("enabled", false).putBoolean("auto", false).commit();
+            prefs.edit().putBoolean("campus_only", true).putBoolean("enabled", false).putBoolean("auto", false).commit();
             activity = startActivitySync(new Intent(context, MainActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             command(V6VpnService.ACTION_START);

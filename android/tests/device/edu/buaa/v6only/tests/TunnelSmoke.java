@@ -28,7 +28,7 @@ public class TunnelSmoke extends Instrumentation {
             ConnectivityManager cm=context.getSystemService(ConnectivityManager.class);
             await(()->isVpn(cm),"VPN default network");
             Network vpn=cm.getActiveNetwork();
-            for(String[] item:new String[][]{{"dual.test","6"},{"v4.test","4"},{"broken6.test","4"},{"v6.test","6"}}){
+            for(String[] item:new String[][]{{"dual.test","6"},{"v4.test","4"},{"v6.test","6"},{"chatgpt.com","4"}}){
                 String ip=query(vpn,item[0],false);
                 check(ip.equals(query(vpn,item[0],true)),"UDP/TCP DNS agree");
                 try(Socket socket=new Socket()){
@@ -37,7 +37,7 @@ public class TunnelSmoke extends Instrumentation {
                     ByteArrayOutputStream out=new ByteArrayOutputStream();TestIo.copy(socket.getInputStream(),out);
                     check(out.toString("US-ASCII").endsWith("tcp"+item[1]+"\n"),"TCP family for "+item[0]);
                 }
-                try(DatagramSocket socket=new DatagramSocket()){
+                if (!item[0].equals("chatgpt.com")) try(DatagramSocket socket=new DatagramSocket()){
                     vpn.bindSocket(socket);socket.setSoTimeout(10000);
                     socket.send(new DatagramPacket(new byte[]{'x'},1,InetAddress.getByName(ip),18080));
                     DatagramPacket p=new DatagramPacket(new byte[100],100);socket.receive(p);
@@ -45,8 +45,28 @@ public class TunnelSmoke extends Instrumentation {
                 }
                 status("PASS "+item[0]+" TCP/UDP chooses IPv"+item[1]);
             }
+            String bad=query(vpn,"broken6.test",false);
+            boolean blocked=false;
+            try(Socket socket=new Socket()) {
+                vpn.bindSocket(socket);socket.connect(new InetSocketAddress(bad,18080),10000);socket.setSoTimeout(10000);
+                socket.getOutputStream().write("GET / HTTP/1.0\r\nHost: broken6.test\r\n\r\n".getBytes("US-ASCII"));
+                ByteArrayOutputStream out=new ByteArrayOutputStream();TestIo.copy(socket.getInputStream(),out);
+                blocked=!out.toString("US-ASCII").contains("tcp4");
+            } catch(IOException expected) { blocked=true; }
+            check(blocked,"failed IPv6 must not fall back to IPv4");
+            status("PASS unreachable IPv6 rejects IPv4 fallback");
             check(CoreNative.flows().contains("tcp6"),"native flow diagnostics");
+            String path=new File(context.getFilesDir(),"traffic.sqlite").getAbsolutePath();
+            long end=System.currentTimeMillis()/1000+1;
+            org.json.JSONObject stats=new org.json.JSONObject(CoreNative.stats(path,0,end));
+            check(stats.optLong("v6_down")>0 && stats.optLong("v4_down")>0,"both physical families counted");
+            long bytes=stats.getLong("v6_down");
+            org.json.JSONObject narrow=new org.json.JSONObject(CoreNative.stats(path,end+10,end+20));
+            check(narrow.optLong("v6_down")==0 && narrow.optLong("v4_down")==0,"time range excludes prior traffic");
             command("stop");await(()->!isVpn(cm),"VPN routes removed on stop");
+            org.json.JSONObject persisted=new org.json.JSONObject(CoreNative.stats(path,0,end));
+            check(persisted.optLong("v6_down")>=bytes,"traffic survives service stop");
+            status("PASS traffic counters, time ranges and persistence");
             try(Socket socket=new Socket()){
                 socket.connect(new InetSocketAddress("10.0.2.2",18080),5000);
             }

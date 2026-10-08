@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="edu.buaa.v6only"
-    android:versionCode="6"
-    android:versionName="1.1.1">
+    android:versionCode="8"
+    android:versionName="2.1.0">
 
-    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="34"/>
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36"/>
 
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
@@ -19,7 +19,7 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
 
     <application
-        android:label="v6only"
+        android:label="V6Only"
         android:icon="@drawable/ic_launcher"
         android:theme="@style/AppTheme"
         android:allowBackup="false">
@@ -31,6 +31,9 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".BackgroundSettingsActivity" android:exported="false"/>
+        <activity android:name=".TrafficActivity" android:exported="false"/>
+        <activity android:name=".ConnectionsActivity" android:exported="false"/>
         <service
             android:name=".V6VpnService"
             android:exported="false"
@@ -38,10 +41,10 @@
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                      android:value="Campus-only IPv6-first traffic forwarding and network monitoring"/>
-            <!-- Off-campus standby deliberately restores the ordinary network. -->
+                      android:value="Local IPv6 traffic forwarding and persistent usage monitoring"/>
+            <!-- Android owns the service lifecycle in always-on mode. -->
             <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
-                       android:value="false"/>
+                       android:value="true"/>
             <intent-filter>
                 <action android:name="android.net.VpnService"/>
             </intent-filter>

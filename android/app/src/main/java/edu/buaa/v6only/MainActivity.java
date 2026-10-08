@@ -39,6 +39,9 @@ public class MainActivity extends Activity {
     private RadioGroup modes;
     private SharedPreferences prefs;
     private boolean rendering, pending, pendingStart;
+    private final java.util.concurrent.ExecutorService statsWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private boolean statsPending;
+    private final Runnable statsTick = new Runnable() { public void run() { refreshTotals(); handler.postDelayed(this, 5000); } };
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable finishPending = () -> { pending = false; refresh(); };
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -49,6 +52,10 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("v6only", MODE_PRIVATE);
         setContentView(R.layout.activity_main);
+        findViewById(R.id.scroll).setOnApplyWindowInsetsListener((v,insets) -> {
+            android.graphics.Insets bars = insets.getSystemWindowInsets();
+            v.setPadding(bars.left,bars.top,bars.right,bars.bottom); return insets;
+        });
         title = findViewById(R.id.status_title);
         description = findViewById(R.id.status_description);
         badge = findViewById(R.id.state_badge);
@@ -74,9 +81,9 @@ public class MainActivity extends Activity {
             if (width > 0 && params.width != width) { params.width = width; content.setLayoutParams(params); }
         });
         toggle.setOnClickListener(view -> {
-            if (V6VpnServiceExt.permissionRequired() && V6VpnServiceExt.campus()) {
+            if (V6VpnServiceExt.permissionRequired()) {
                 // Consent is requested only after the service identifies a campus network.
-                if (CampusWatcher.cellularDefault(this)) { sendCommand(V6VpnService.ACTION_APPLY); return; }
+
                 Intent permission = VpnService.prepare(this);
                 if (permission == null) sendCommand(V6VpnService.ACTION_APPLY);
                 else startActivityForResult(permission, VPN_PERMISSION);
@@ -95,7 +102,8 @@ public class MainActivity extends Activity {
             if (prefs.getBoolean("enabled", false)) sendCommand(V6VpnService.ACTION_APPLY);
             refresh();
         });
-        findViewById(R.id.wifi_row).setOnClickListener(view -> requestWifiPermission());
+        findViewById(R.id.traffic_history).setOnClickListener(view -> startActivity(new Intent(this, TrafficActivity.class)));
+        findViewById(R.id.connections).setOnClickListener(view -> startActivity(new Intent(this, ConnectionsActivity.class)));
         findViewById(R.id.battery_row).setOnClickListener(view -> showBackgroundHelp());
         findViewById(R.id.notification_row).setOnClickListener(view -> {
             if (Build.VERSION.SDK_INT >= 33 && !granted(Manifest.permission.POST_NOTIFICATIONS)) {
@@ -119,7 +127,7 @@ public class MainActivity extends Activity {
     private void setTipsOpen(boolean open) {
         findViewById(R.id.tips_content).setVisibility(open ? View.VISIBLE : View.GONE);
         ((ImageView) findViewById(R.id.tips_arrow)).setRotation(open ? 180 : 0);
-        findViewById(R.id.tips_toggle).setContentDescription("使用提示与 iQOO 设置，" + (open ? "收起" : "展开"));
+        findViewById(R.id.tips_toggle).setContentDescription("使用提示，" + (open ? "收起" : "展开"));
     }
 
     @Override protected void onSaveInstanceState(Bundle outState) {
@@ -132,12 +140,7 @@ public class MainActivity extends Activity {
     }
 
     private void showBackgroundHelp() {
-        new AlertDialog.Builder(this).setTitle("让服务留在后台")
-                .setMessage("划掉最近任务后，服务会继续监听网络。\n\niQOO / vivo 建议完成：\n1. 允许 v6only 自启动与后台运行。\n2. 将电池策略设为不限制。\n3. 在最近任务中锁定应用。\n\n菜单名称随系统版本不同；系统强行停止后需重新打开应用。")
-                .setPositiveButton("电池设置", (dialog, which) -> openSettings(
-                        new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)))
-                .setNeutralButton("应用设置", (dialog, which) -> openSettings(appSettings()))
-                .setNegativeButton("稍后", null).show();
+        startActivity(new Intent(this, BackgroundSettingsActivity.class));
     }
 
     private void requestWifiPermission() {
@@ -192,6 +195,8 @@ public class MainActivity extends Activity {
     }
 
     private void startVpn() {
+        Intent permission = VpnService.prepare(this);
+        if (permission != null) { startActivityForResult(permission, VPN_PERMISSION); return; }
         userCommand(true);
         if (Build.VERSION.SDK_INT >= 33 && !granted(Manifest.permission.POST_NOTIFICATIONS)) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION);
@@ -224,15 +229,18 @@ public class MainActivity extends Activity {
         super.onResume();
         if (prefs.getBoolean("enabled", false)) sendCommand(V6VpnService.ACTION_APPLY);
         refresh();
+        handler.removeCallbacks(statsTick); handler.post(statsTick);
     }
 
     @Override protected void onStop() {
+        handler.removeCallbacks(statsTick);
         unregisterReceiver(receiver);
         super.onStop();
     }
 
     @Override protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        statsWorker.shutdown();
         super.onDestroy();
     }
 
@@ -245,6 +253,18 @@ public class MainActivity extends Activity {
         shape.setCornerRadius(dp(24));
         badge.setBackground(shape);
         badge.setTextColor(textColor);
+    }
+
+    private void refreshTotals() {
+        if (statsPending || statsWorker.isShutdown()) return;
+        statsPending = true;
+        statsWorker.execute(() -> {
+            try {
+                org.json.JSONObject r = new org.json.JSONObject(CoreNative.stats(new java.io.File(getFilesDir(), "traffic.sqlite").getAbsolutePath(), 0, System.currentTimeMillis()/1000+1));
+                long v6 = r.optLong("v6_up") + r.optLong("v6_down"), v4 = r.optLong("v4_up") + r.optLong("v4_down");
+                handler.post(() -> { if (!isDestroyed()) { ((TextView)findViewById(R.id.traffic_total)).setText(TrafficActivity.bytes(v4+v6)); ((TextView)findViewById(R.id.traffic_split)).setText("IPv6  " + TrafficActivity.bytes(v6) + "　·　IPv4  " + TrafficActivity.bytes(v4)); } statsPending=false; });
+            } catch (Exception error) { handler.post(() -> statsPending=false); }
+        });
     }
 
     private void refresh() {
@@ -261,9 +281,9 @@ public class MainActivity extends Activity {
         if (pending || (enabled && !monitoring)) {
             showState(pending && !pendingStart ? "正在停止" : "正在启动", "正在更新服务状态，请稍候。", "处理中", neutral, Color.WHITE);
         } else if (connected) {
-            showState("连接已开启", "服务已在后台运行，退出界面后继续保持。", "已连接", Color.rgb(162, 236, 214), Color.rgb(12, 65, 59));
+            showState("连接已开启", "正在记录流量。", "已连接", Color.rgb(162, 236, 214), Color.rgb(12, 65, 59));
         } else if (monitoring && V6VpnServiceExt.permissionRequired()) {
-            showState("等待 VPN 授权", "已识别校园网。授权后开始连接；当前保持系统网络。", "待授权", neutral, Color.WHITE);
+            showState("等待 VPN 授权", "授权后开始连接。", "待授权", neutral, Color.WHITE);
         } else if (monitoring) {
             String message = V6VpnServiceExt.message();
             if (message.contains("失败") || message.contains("DNS")) {
@@ -277,26 +297,26 @@ public class MainActivity extends Activity {
         } else if (V6VpnServiceExt.message().contains("当前非校园网")) {
             showState("仅限校园网", "当前网络无需启用。接入校园网后可手动启动，或选择自动模式等待。", "未启动", neutral, Color.WHITE);
         } else {
-            showState("连接未开启", "开启服务，按所选方式管理校园网络连接。", "未启动", neutral, Color.WHITE);
+            showState("连接未开启", "连接后开始记录流量。", "未启动", neutral, Color.WHITE);
         }
-        toggle.setEnabled(!pending);
+        boolean alwaysOn = V6VpnServiceExt.alwaysOn();
+        toggle.setEnabled(!pending && !alwaysOn);
         toggle.setAlpha(pending ? 0.65f : 1f);
-        toggle.setText(pending ? (pendingStart ? "正在启动…" : "正在停止…")
+        toggle.setText(alwaysOn ? "常驻连接" : pending ? (pendingStart ? "正在启动…" : "正在停止…")
                 : V6VpnServiceExt.permissionRequired() ? "授权并连接"
                 : enabled || monitoring ? "停止服务" : "启动服务");
-        network.setText("校园网  ·  " + (!monitoring ? "启动后识别" : V6VpnServiceExt.campus()
-                ? "已识别（" + V6VpnServiceExt.reason() + "）" : "暂未识别"));
+        network.setText("网络  ·  " + (connected ? "已连接" : "未连接"));
         background.setText("后台监听  ·  " + (monitoring ? "持续运行" : enabled ? "正在恢复" : "已停止"));
         rendering = true;
         modes.check(automatic ? R.id.mode_auto : R.id.mode_manual);
         rendering = false;
-        modeDescription.setText(automatic ? "识别校园网后连接，离开后继续监听。" : "仅连接校园网，离校后停止，回校需手动启动。");
+        modeDescription.setText(automatic ? "重启手机后恢复连接。" : "打开应用后手动连接。");
         boolean location = getSystemService(LocationManager.class).isLocationEnabled();
         wifiDetail.setText(!granted(Manifest.permission.ACCESS_FINE_LOCATION) ? "DNS / 域名可用 · Wi-Fi 名称需授权"
                 : !location ? "Wi-Fi 名称识别需开启系统定位"
                 : !granted(Manifest.permission.ACCESS_BACKGROUND_LOCATION) ? "前台已授权 · 后台识别可设置" : "Wi-Fi 名称识别已就绪");
         boolean exempt = getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName());
-        batteryDetail.setText(exempt ? "电池优化已豁免 · 查看自启动设置" : "建议解除电池限制 · iQOO 设置指引");
+        batteryDetail.setText(exempt ? "电池优化已豁免 · 查看自启动设置" : "设置自启动与后台耗电管理");
         boolean notifications = getSystemService(NotificationManager.class).areNotificationsEnabled();
         notificationDetail.setText(notifications ? "已允许 · 可查看后台运行状态" : "尚未允许 · 点击开启运行通知");
     }

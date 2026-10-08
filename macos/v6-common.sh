@@ -9,6 +9,7 @@ CAMPUS_DNS=(202.112.128.50 202.112.128.51)
 # never leave the entire system pointing at a process-local DNS listener.
 DNS_SERVERS=("${CAMPUS_DNS[@]}")
 PORTAL_HOST=gw.buaa.edu.cn
+PAC_URL=http://127.0.0.1:17890/proxy.pac
 PF_ANCHOR=com.apple/v6only
 STATE_DIR="${STATE_DIR:-/var/db/v6only}"
 RUN_DIR="${RUN_DIR:-/var/run}"
@@ -53,12 +54,22 @@ pf_active() {
     actual=$(pfctl -a "$PF_ANCHOR" -sr 2>/dev/null) || return 1
     [[ "$actual" == "$(cat "$STATE_DIR/pf.expected")" ]]
 }
+proxies_paused() {
+    local kind
+    for kind in webproxy securewebproxy socksfirewallproxy; do
+        networksetup -get"$kind" "$SERVICE" | grep -q '^Enabled: No' || return 1
+    done
+    local pac
+    pac=$(networksetup -getautoproxyurl "$SERVICE") || return 1
+    printf '%s\n' "$pac" | grep -Fxq "URL: $PAC_URL" || return 1
+    printf '%s\n' "$pac" | grep -q '^Enabled: Yes'
+}
 configuration_active() {
     [[ -f "$MARKER" && -d "$ORIGINAL" ]] || return 1
     [[ "$(cat "$ORIGINAL/service")" == "$SERVICE" ]] || return 1
     [[ -f "$STATE_DIR/rules.signature" ]] || return 1
     [[ "$(cat "$STATE_DIR/rules.signature")" == "$(rules_signature)" ]] || return 1
-    dns_active && pf_active && core_active || return 1
+    dns_active && pf_active && core_active && core_network_matches && proxies_paused || return 1
     bypass_active || return 1
     [[ -f "$RESOLVER_DIR/$PORTAL_HOST" ]] || return 1
     [[ "$(cat "$RESOLVER_DIR/$PORTAL_HOST")" == "$(desired_resolver)" ]]

@@ -64,17 +64,17 @@ try {
 
     $dns = (Get-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4).ServerAddresses | Select-Object -First 1
     if (-not $dns) { throw 'No physical DNS for full-routing test' }
-    & curl.exe --noproxy '*' -fsS --max-time 20 https://example.com/ -o NUL
+    & curl.exe --noproxy '*' -fsS --max-time 20 http://1.1.1.1/ -o NUL
     if ($LASTEXITCODE) { throw 'Baseline HTTPS failed' }
     $tun=Start-Core $dns $false
     foreach ($prefix in @('0.0.0.0/1','128.0.0.0/1','::/1','8000::/1')) {
         $hop=if($prefix -like '*:*'){'::'}else{'0.0.0.0'}
         New-NetRoute -InterfaceIndex $tun.ifIndex -DestinationPrefix $prefix -NextHop $hop -PolicyStore ActiveStore -RouteMetric 1 | Out-Null
     }
-    & curl.exe --noproxy '*' -fsS --max-time 30 https://example.com/ -o NUL
+    & curl.exe --noproxy '*' -fsS --max-time 30 http://1.1.1.1/ -o NUL
     if ($LASTEXITCODE) { throw 'HTTPS failed under full Wintun routing' }
     Stop-Core
-    & curl.exe --noproxy '*' -fsS --max-time 20 https://example.com/ -o NUL
+    & curl.exe --noproxy '*' -fsS --max-time 20 http://1.1.1.1/ -o NUL
     if ($LASTEXITCODE) { throw 'HTTPS failed after core exit' }
     Write-Host 'PASS full routing and physical network recovery after core exit'
 } finally {

@@ -65,7 +65,7 @@ zip -qj base.apk classes.dex
 zip -qr base.apk lib assets
 
 echo "[5/6] zipalign"
-"$BT/zipalign" -f 4 base.apk aligned.apk
+"$BT/zipalign" -P 16 -f 4 base.apk aligned.apk
 
 echo "[6/6] apksigner 签名"
 if [[ -n "${V6ONLY_KEYSTORE:-}" ]]; then

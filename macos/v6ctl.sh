@@ -31,6 +31,10 @@ save_originals() {
     printf '%s\n' "$SERVICE" > "$stage/service"
     current_dns > "$stage/dns"
     current_bypass > "$stage/bypass"
+    for kind in webproxy securewebproxy socksfirewallproxy; do
+        networksetup -get"$kind" "$SERVICE" | awk '/^Enabled:/{print $2;exit}' > "$stage/proxy.$kind"
+    done
+    networksetup -getautoproxyurl "$SERVICE" > "$stage/proxy.pac"
     if [[ -e "$RESOLVER_DIR/$PORTAL_HOST" ]]; then
         [[ ! -L "$RESOLVER_DIR/$PORTAL_HOST" ]] || die '网关 resolver 是符号链接，请先检查。'
         cp -p "$RESOLVER_DIR/$PORTAL_HOST" "$stage/resolver"
@@ -80,6 +84,24 @@ restore() {
             fi
         fi
     fi
+    if [[ -f "$STATE_DIR/proxy.managed" && -d "$ORIGINAL" ]]; then
+        for kind in webproxy securewebproxy socksfirewallproxy; do
+            current=$(networksetup -get"$kind" "$SERVICE" | awk '/^Enabled:/{print $2;exit}')
+            if [[ "$current" == No && -f "$ORIGINAL/proxy.$kind" ]]; then
+                original=$(cat "$ORIGINAL/proxy.$kind")
+                if [[ "$original" == Yes ]]; then networksetup -set"$kind"state "$SERVICE" on || failed=1; fi
+            fi
+        done
+    fi
+    if [[ -f "$STATE_DIR/proxy.managed" && -f "$ORIGINAL/proxy.pac" ]]; then
+        pac=$(networksetup -getautoproxyurl "$SERVICE")
+        if printf '%s\n' "$pac" | grep -Fxq "URL: $PAC_URL"; then
+            networksetup -setautoproxystate "$SERVICE" off || failed=1
+            old_url=$(sed -n 's/^URL: //p' "$ORIGINAL/proxy.pac")
+            networksetup -setautoproxyurl "$SERVICE" "$old_url" || failed=1
+            if grep -q '^Enabled: Yes' "$ORIGINAL/proxy.pac"; then networksetup -setautoproxystate "$SERVICE" on || failed=1; else networksetup -setautoproxystate "$SERVICE" off || failed=1; fi
+        fi
+    fi
     if [[ -f "$STATE_DIR/pf.loaded" ]]; then
         pfctl -a "$PF_ANCHOR" -F rules || failed=1
     fi
@@ -94,7 +116,7 @@ restore() {
         rm -rf "$ORIGINAL"
         rm -f "$MARKER" "$STATE_DIR/pf.loaded" "$STATE_DIR/pf.token" \
             "$STATE_DIR/pf.expected" "$STATE_DIR/bypass.expected" "$STATE_DIR/bypass.added" \
-            "$STATE_DIR/bypass.current" "$STATE_DIR/bypass.restore" "$STATE_DIR/rules.signature"
+            "$STATE_DIR/bypass.current" "$STATE_DIR/bypass.restore" "$STATE_DIR/rules.signature" "$STATE_DIR/proxy.managed"
     fi
     return "$failed"
 }
@@ -139,6 +161,10 @@ on() {
         printf '%s\n' "$PORTAL_HOST" >> "$STATE_DIR/bypass.expected"
     fi
     start_core
+    for kind in webproxy securewebproxy socksfirewallproxy; do networksetup -set"$kind"state "$SERVICE" off; done
+    touch "$STATE_DIR/proxy.managed"
+    networksetup -setautoproxyurl "$SERVICE" "$PAC_URL"
+    networksetup -setautoproxystate "$SERVICE" on
     networksetup -setdnsservers "$SERVICE" "${DNS_SERVERS[@]}"
     set_bypass_file "$STATE_DIR/bypass.expected"
     if [[ ! -d "$RESOLVER_DIR" ]]; then mkdir -m 755 "$RESOLVER_DIR"; fi
@@ -162,7 +188,7 @@ on() {
     validate_forwarding || die '转发后的 DNS/TLS 连通性验证失败，恢复原网络。'
     rm -f "$SUSPEND"
     trap - ERR
-    printf '已应用 IPv6 优先转发；同域名的 IPv6 连接全部失败后才回退 IPv4。\n'
+    printf '已启用严格 IPv6 转发；仅无 AAAA 记录的目标使用 IPv4。\n'
 }
 
 off() {
@@ -172,7 +198,7 @@ off() {
     fi
     restore
     if [[ "$mode" == manual ]]; then
-        printf '%s\n' "$(( $(date +%s) + 1800 ))" > "$SUSPEND"
+        : > "$SUSPEND"
     fi
     printf '已撤销 v6only 管理的设置，保留其他代理和 PF 规则。\n'
 }
@@ -184,7 +210,7 @@ main() {
         on) lock; on;;
         off) lock; off "${2:-manual}";;
         status)
-            if configuration_active; then printf 'IPv6 优先转发已生效。\n';
+            if configuration_active; then printf '严格 IPv6 转发已生效。\n';
             else die '配置未完整生效。'; fi;;
         *) die '用法：v6ctl.sh on | off [auto] | status';;
     esac

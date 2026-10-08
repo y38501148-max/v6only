@@ -1,0 +1,34 @@
+name: Windows desktop MSI
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-msi:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version-file: core/go.mod, cache-dependency-path: core/go.sum}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm, cache-dependency-path: desktop/package-lock.json}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {workspaces: 'desktop/src-tauri -> target'}
+      - name: Build desktop, service and MSI
+        shell: pwsh
+        run: ./scripts/build-desktop-windows.ps1
+      - name: Verify MSI installation, service IPC, UI launch and network restoration
+        shell: pwsh
+        run: ./windows/test-msi.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V6Only-Windows-x64
+          path: |
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+            build/msi-test/*.json
+            build/msi-test/*.log

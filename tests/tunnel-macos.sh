@@ -59,7 +59,7 @@ echo 'PASS controlled dual-stack sockets through macOS utun'
 PHYSICAL=$(route -n get default | awk '/interface:/{print $2}')
 UPSTREAM=$(scutil --dns | awk '/nameserver\[0\]/{print $3;exit}')
 [[ -n "$PHYSICAL" && -n "$UPSTREAM" ]] || exit 1
-curl --noproxy '*' -fsS --max-time 20 https://example.com/ -o /dev/null
+curl --noproxy '*' -fsS --max-time 20 http://1.1.1.1/ -o /dev/null
 start --interface "$PHYSICAL" --dns "$UPSTREAM"
 # shellcheck disable=SC2034
 IFACE="$PHYSICAL"
@@ -68,10 +68,10 @@ route -n add -net 0.0.0.0/1 -interface "$DEV"
 route -n add -net 128.0.0.0/1 -interface "$DEV"
 route -n add -inet6 ::/1 -interface "$DEV"
 route -n add -inet6 8000::/1 -interface "$DEV"
-curl --noproxy '*' -fsS --max-time 30 https://example.com/ -o /dev/null || { cat "$BIN/core.log"; exit 1; }
+curl --noproxy '*' -fsS --max-time 30 http://1.1.1.1/ -o /dev/null || { cat "$BIN/core.log"; exit 1; }
 echo 'PASS real HTTPS with full macOS TUN routing'
 stop_test_core
 remove_physical_routes
 [[ $(route -n get 1.1.1.1 | awk '/interface:/{print $2}') == "$PHYSICAL" ]]
-curl --noproxy '*' -fsS --max-time 20 https://example.com/ -o /dev/null
+curl --noproxy '*' -fsS --max-time 20 http://1.1.1.1/ -o /dev/null
 echo 'PASS core exit restores physical routing and DNS remains usable'

@@ -172,7 +172,7 @@ jobs:
         with: { distribution: temurin, java-version: '17' }
       - name: Build and verify Android APK
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.13846066'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.13846066' 'platforms;android-36' 'build-tools;35.0.0'
           bash android/build-apk.sh
       - name: Campus detection and mode regression tests
         run: bash android/test.sh
@@ -201,9 +201,9 @@ jobs:
         with: {distribution: temurin, java-version: '17'}
       - name: Install Android build tools and enable emulator KVM
         run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.13846066' 'platforms;android-35' 'build-tools;35.0.0'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.13846066' 'platforms;android-36' 'build-tools;35.0.0' 'build-tools;35.0.0'
           sudo chmod 666 /dev/kvm
-      - name: Real mobile startup, VPN coexistence and campus Wi-Fi handover
+      - name: Real IPv4/IPv6 tunnel, persistent counters and native UI
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: ${{ matrix.api }}
@@ -211,7 +211,7 @@ jobs:
           target: google_apis
           disable-animations: true
           # The action runs each script line in its own shell; keep exports together.
-          script: export V6ONLY_ANDROID_ABIS=x86_64 ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-35/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"; for suite in cellular other-vpn handover network; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done
+          script: export V6ONLY_ANDROID_ABIS=x86_64 ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-36/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"; for suite in tunnel ui; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done
       - uses: actions/upload-artifact@v4
         if: always()
         with:

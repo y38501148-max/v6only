@@ -9,6 +9,8 @@ import java.io.IOException;
 
 /** Compiled only into v6only-fixture.apk. Never part of a release APK. */
 public class FixtureVpn extends V6VpnService {
+    @Override protected java.util.List<String> publicDns(android.net.Network network) { return java.util.Collections.emptyList(); }
+
     private Network physical;
     public static volatile String failure = "";
     @Override public int onStartCommand(Intent intent, int flags, int id) {

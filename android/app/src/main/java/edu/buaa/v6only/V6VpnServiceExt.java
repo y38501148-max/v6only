@@ -5,6 +5,9 @@ import android.content.Context;
 /** Process-local observed state; persisted user intent lives in SharedPreferences. */
 public final class V6VpnServiceExt {
     private static volatile boolean running;
+    private static volatile boolean alwaysOn;
+    public static boolean alwaysOn() { return alwaysOn; }
+    static void setAlwaysOn(boolean value) { alwaysOn = value; }
     private static volatile boolean monitoring;
     private static volatile boolean campus;
     private static volatile boolean permissionRequired;

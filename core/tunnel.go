@@ -88,23 +88,8 @@ func (r *Router) tcp(c adapter.TCPConn) {
 		host = ip.String()
 	}
 	remote, e := r.Dial(r.ctx, host, strconv.Itoa(int(port)))
-	if e != nil && host != ip.String() && !isFake(ip) && r.ctx.Err() == nil {
-		// A DNS outage or a different CDN answer must not make an otherwise
-		// reachable, real destination unusable. IPv6 candidates were attempted
-		// first whenever resolution succeeded. Never send a synthetic IP out.
-		network := "tcp6"
-		if ip.To4() != nil {
-			network = "tcp4"
-		}
-		ctx, cancel := context.WithTimeout(r.ctx, time.Duration(r.cfg.FamilyTimeoutMS)*time.Millisecond)
-		remote, e = r.rawDial(ctx, network, net.JoinHostPort(ip.String(), strconv.Itoa(int(port))))
-		cancel()
-		if e == nil {
-			r.record(host, remote, network, "original_destination_after_lookup_or_connect_failure")
-		}
-	}
 	if e != nil {
-		log.Printf("TCP forwarding failed: %v", e)
+		log.Printf("TCP forwarding failed for %s:%d: %v", host, port, e)
 		return
 	}
 	if !r.track(remote) {
@@ -209,12 +194,19 @@ func (r *Router) udp(c adapter.UDPConn) {
 // UDP connect() cannot prove reachability. Wait for an actual first response.
 // Retry the initial datagram only while establishing a flow, never race v4 with v6.
 func (r *Router) OpenUDP(ctx context.Context, host, port string, first []byte) (net.Conn, []byte, error) {
+	if (r.cfg.ChatGPTProxy != "" || r.cfg.ChatGPTIPv4) && isChatGPT(host) {
+		return nil, nil, fmt.Errorf("ChatGPT uses TCP through its IPv4 proxy")
+	}
 	result, e := r.addresses(ctx, host)
 	if e != nil {
 		return nil, nil, e
 	}
 	var last error = errors.New("no UDP addresses")
-	for family, ips := range [][]net.IP{result.V6, result.V4} {
+	families := [][]net.IP{result.V6, nil}
+	if len(result.V6) == 0 {
+		families[1] = result.V4
+	}
+	for family, ips := range families {
 		budget := time.Duration(r.cfg.FamilyTimeoutMS) * time.Millisecond
 		if len(ips) == 0 {
 			continue
@@ -228,7 +220,7 @@ func (r *Router) OpenUDP(ctx context.Context, host, port string, first []byte) (
 			reason := "ipv6_response"
 			if family == 1 {
 				network = "udp4"
-				reason = "no_ipv6_response"
+				reason = "no_aaaa"
 			}
 			sub, cancel := context.WithTimeout(ctx, per)
 			c, e := r.rawDial(sub, network, net.JoinHostPort(ip.String(), port))

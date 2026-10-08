@@ -4,6 +4,8 @@ import android.net.NetworkCapabilities;
 
 /** Only the disposable emulator's Wi-Fi is marked as campus; lifecycle is production code. */
 public final class HandoverVpn extends V6VpnService {
+    @Override protected java.util.List<String> publicDns(android.net.Network network) { return java.util.Collections.emptyList(); }
+
     @Override public void onCreate() {
         if (!android.os.Build.HARDWARE.contains("ranchu") && !android.os.Build.HARDWARE.contains("goldfish"))
             throw new IllegalStateException("Fixture requires an emulator");

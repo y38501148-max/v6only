@@ -42,7 +42,7 @@ public class V6VpnService extends VpnService {
         super.onCreate();
         prefs = getSharedPreferences("v6only", MODE_PRIVATE);
         getSystemService(NotificationManager.class).createNotificationChannel(
-                new NotificationChannel(CHANNEL_ID, "v6only 后台服务", NotificationManager.IMPORTANCE_LOW));
+                silentChannel());
         watcher = new CampusWatcher(this, handler, this::reconcile);
     }
 
@@ -50,12 +50,13 @@ public class V6VpnService extends VpnService {
         String action = intent == null ? null : intent.getAction();
         // Foreground first, including stop/restore intents delivered via startForegroundService.
         startForeground(NOTIF_ID, notification("正在检查网络"));
+        V6VpnServiceExt.setAlwaysOn(isAlwaysOn());
         if (ACTION_STOP.equals(action)) {
             prefs.edit().putBoolean("enabled", false).commit();
             stopEverything();
             return START_NOT_STICKY;
         }
-        if (ACTION_START.equals(action)) prefs.edit().putBoolean("enabled", true).commit();
+        if (ACTION_START.equals(action) || (intent != null && VpnService.SERVICE_INTERFACE.equals(action)) || isAlwaysOn()) prefs.edit().putBoolean("enabled", true).commit();
         if (!prefs.getBoolean("enabled", false)) {
             stopEverything();
             return START_NOT_STICKY;
@@ -76,7 +77,8 @@ public class V6VpnService extends VpnService {
         V6VpnServiceExt.setPermissionRequired(false);
         V6VpnServiceExt.setCampus(state.isCampus(), state.campusReason);
         boolean automatic = prefs.getBoolean("auto", true);
-        if (!CampusPolicy.shouldConnect(true, automatic, state.isCampus(), state.network != null)) {
+        boolean campusOnly = prefs.getBoolean("campus_only", false);
+        if (state.network == null || (campusOnly && !CampusPolicy.shouldConnect(true, automatic, state.isCampus(), true))) {
             closeTun();
             if (!automatic && state.network != null && !state.isCampus()) {
                 prefs.edit().putBoolean("enabled", false).commit();
@@ -90,7 +92,7 @@ public class V6VpnService extends VpnService {
         if (prepare(this) != null) {
             closeTun();
             V6VpnServiceExt.setPermissionRequired(true);
-            publish("校园网已识别，请打开应用授权 VPN");
+            publish("请打开应用完成连接授权");
             return;
         }
         // Keep the network-provided DNS servers so campus/internal names continue to work.
@@ -107,7 +109,7 @@ public class V6VpnService extends VpnService {
         boolean metered = !state.capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
         String key = state.network + ":" + dns + ":" + state.links.getDomains() + ":" + metered;
         if (tun != null && key.equals(configuration)) {
-            publish(automatic ? "自动模式：校园网已连接" : "手动模式：已连接");
+            publish("已连接");
             return;
         }
         try {
@@ -117,7 +119,7 @@ public class V6VpnService extends VpnService {
             configuration = key;
             V6VpnServiceExt.setRunning(true);
             Log.i("V6VpnService", "IPv6 forwarding VPN established on " + state.network + ", DNS=" + dns);
-            publish(automatic ? "自动模式：校园网已连接" : "手动模式：已连接");
+            publish("已连接");
         } catch (Exception error) {
             // Fail open: never leave a broken tunnel behind and black-hole browser traffic.
             closeTun();
@@ -132,7 +134,7 @@ public class V6VpnService extends VpnService {
             // Tear down the old stack before replacing its TUN or physical network.
             closeTun();
             coreNetwork = network;
-            Builder builder = new Builder().setSession("v6only · IPv6 优先转发")
+            Builder builder = new Builder().setSession("V6Only")
                     .setMtu(1500)
                     .addAddress("198.18.0.1", 15)
                     .addAddress("fd00:198:18::1", 64)
@@ -147,9 +149,19 @@ public class V6VpnService extends VpnService {
             tun = next;
             org.json.JSONArray servers = new org.json.JSONArray();
             for (String address : dns) servers.put(address);
-            org.json.JSONObject config = new org.json.JSONObject().put("dns", servers).put("fake_dns", true).put("generation",coreGeneration);
+            org.json.JSONArray fallback = new org.json.JSONArray();
+            for (String address : publicDns(network)) fallback.put(address);
+            org.json.JSONObject config = new org.json.JSONObject().put("dns", servers).put("ipv6_dns", fallback)
+                    .put("chatgpt_ipv4", true).put("stats_db", new java.io.File(getFilesDir(), "traffic.sqlite").getAbsolutePath())
+                    .put("fake_dns", true).put("generation",coreGeneration);
             String error = CoreNative.start(next.getFd(), config.toString(), this);
             if (!error.isEmpty()) throw new IOException(error);
+    }
+
+    protected List<String> publicDns(Network network) {
+        android.net.LinkProperties links = getSystemService(android.net.ConnectivityManager.class).getLinkProperties(network);
+        boolean v6 = links != null && links.getLinkAddresses().stream().anyMatch(a -> a.getAddress() instanceof Inet6Address && !a.getAddress().isLinkLocalAddress());
+        return java.util.Arrays.asList(v6 ? new String[]{"2400:3200::1", "2400:3200:baba::1"} : new String[]{"223.5.5.5", "223.6.6.6"});
     }
 
     private PendingIntent openActivity() {
@@ -157,17 +169,22 @@ public class V6VpnService extends VpnService {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    private NotificationChannel silentChannel() {
+        NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "连接状态", NotificationManager.IMPORTANCE_LOW);
+        channel.setSound(null, null); channel.enableVibration(false); channel.setShowBadge(false); return channel;
+    }
+
     private Notification notification(String message) {
         PendingIntent stop = PendingIntent.getService(this, 1,
                 new Intent(this, V6VpnService.class).setAction(ACTION_STOP),
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        return new Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("v6only 后台服务")
-                .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .setContentIntent(openActivity())
-                .addAction(new Notification.Action.Builder(null, "停止服务", stop).build())
-                .setOnlyAlertOnce(true).setOngoing(true).build();
+        Notification.Builder builder = new Notification.Builder(this, CHANNEL_ID)
+                .setContentTitle("V6Only").setContentText(message)
+                .setSmallIcon(android.R.drawable.ic_lock_lock).setContentIntent(openActivity())
+                .setOnlyAlertOnce(true).setSound(null).setVibrate(new long[0])
+                .setOngoing(true).setCategory(Notification.CATEGORY_SERVICE);
+        if (!isAlwaysOn()) builder.addAction(new Notification.Action.Builder(null, "停止服务", stop).build());
+        return builder.build();
     }
 
     private void publish(String message) {
@@ -221,6 +238,7 @@ public class V6VpnService extends VpnService {
         watcher.stop();
         closeTun();
         V6VpnServiceExt.setMonitoring(false);
+        V6VpnServiceExt.setAlwaysOn(false);
         V6VpnServiceExt.setPermissionRequired(false);
         V6VpnServiceExt.setCampus(false, "");
         publish("服务已停止");
@@ -249,6 +267,7 @@ public class V6VpnService extends VpnService {
         watcher.stop();
         closeTun();
         V6VpnServiceExt.setMonitoring(false);
+        V6VpnServiceExt.setAlwaysOn(false);
         V6VpnServiceExt.setPermissionRequired(false);
         // Keep the reason for an explicit shutdown visible after service destruction.
         publish(stopping ? V6VpnServiceExt.message() : "服务已停止");

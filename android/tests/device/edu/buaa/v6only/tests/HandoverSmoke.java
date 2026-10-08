@@ -27,7 +27,7 @@ public final class HandoverSmoke extends Instrumentation {
         try {
             context=getTargetContext();cm=context.getSystemService(ConnectivityManager.class);
             prefs=context.getSharedPreferences("v6only",Context.MODE_PRIVATE);
-            prefs.edit().putBoolean("enabled",false).commit();
+            prefs.edit().putBoolean("campus_only", true).putBoolean("enabled",false).commit();
             runOnMainSync(() -> context.startForegroundService(new Intent(context,V6VpnService.class).setAction(V6VpnService.ACTION_STOP)));
             SystemClock.sleep(300);
             // MainActivity.onResume applies the production service. That would run
@@ -41,7 +41,7 @@ public final class HandoverSmoke extends Instrumentation {
                 // disabled auto-join in a fresh Android 15+ emulator.
                 if(android.os.Build.VERSION.SDK_INT>=35) shell("cmd wifi connect-network AndroidWifi open");
                 await(()->transport(NetworkCapabilities.TRANSPORT_WIFI),"Wi-Fi default");
-                prefs.edit().putBoolean("enabled",false).putBoolean("auto",automatic).commit();
+                prefs.edit().putBoolean("campus_only", true).putBoolean("enabled",false).putBoolean("auto",automatic).commit();
                 command(V6VpnService.ACTION_START);
                 await(()->V6VpnServiceExt.running(context)&&transport(NetworkCapabilities.TRANSPORT_VPN),"campus VPN established");
                 Network before = stableTunnel();

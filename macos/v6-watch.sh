@@ -13,7 +13,7 @@ watch_once() {
         configuration_active && return 0
         # A broken running core must restore connectivity, not repeatedly seize
         # the same network. Manual on can resume after the fault is investigated.
-        if [[ -f "$MARKER" ]] && ! core_active; then
+        if [[ -f "$MARKER" ]] && ! core_active && core_network_matches; then
             /bin/bash "$V6_DIR/v6ctl.sh" off >> "$LOG" 2>&1 || return 1
             : > "$SUSPEND"
             log 'forwarding core lost → restored system network and paused'

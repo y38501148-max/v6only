@@ -109,9 +109,6 @@ func validHost(s string) bool {
 	return true
 }
 func sniff(c net.Conn, port uint16) (net.Conn, string) {
-	if port != 443 && port != 80 && port != 8443 {
-		return c, ""
-	}
 	c.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 	defer c.SetReadDeadline(time.Time{})
 	reader := bufio.NewReaderSize(c, 65536)
@@ -129,7 +126,7 @@ func sniff(c net.Conn, port uint16) (net.Conn, string) {
 		}
 		return &bufferedConn{c, reader}, ""
 	}
-	if port == 80 {
+	if bytes.HasPrefix(header, []byte("GET ")) || bytes.HasPrefix(header, []byte("POST ")) || bytes.HasPrefix(header, []byte("HEAD ")) || bytes.HasPrefix(header, []byte("PUT ")) || bytes.HasPrefix(header, []byte("OPTIONS ")[:5]) || bytes.HasPrefix(header, []byte("CONNE")) {
 		var saved bytes.Buffer
 		for saved.Len() < 32768 {
 			line, e := reader.ReadString('\n')
