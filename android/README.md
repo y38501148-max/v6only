@@ -1,4 +1,4 @@
-# V6Only Android 2.1.0
+# V6Only Android 2.1.1
 
 原生 Android 界面 + VpnService 后台服务，复用桌面版 Go 转发核心。支持 Android 10 及以上；APK 包含 arm64-v8a（iQOO 15）和 x86_64。编译/目标 API 36，原生 ELF 已检查为 16 KiB 对齐。
 
@@ -27,7 +27,7 @@
 
 ## 路由和限制
 
-有 AAAA 的目标仅连接 IPv6，失败不退回 IPv4；确认无 AAAA 的目标允许 IPv4。网络 DNS 漏掉公网 AAAA 时通过公共 DNS 补充查询；校园内网名称保留网络 DNS。网络有原生 IPv6 时公共 DNS 使用 IPv6 传输；仅 IPv4 网络使用 IPv4 DNS 传输，但这不能让 IPv6 目标在缺少 IPv6 的网络上工作。
+有 AAAA 的目标仅连接 IPv6，失败不退回 IPv4；确认无 AAAA 的目标允许 IPv4。网络 DNS 漏掉公网 AAAA 时通过公共 DNS 补充查询；网络 DNS 已成功返回无 AAAA 时，补充查询最多等待 1 秒，公共 DNS 不通不会阻断已确认的 IPv4 目标。两组 DNS 都失败时仍报错。校园内网名称保留网络 DNS。网络有原生 IPv6 时公共 DNS 使用 IPv6 传输；仅 IPv4 网络使用 IPv4 DNS 传输，但这不能让 IPv6 目标在缺少 IPv6 的网络上工作。
 
 Android 版对 ChatGPT/OpenAI 域名禁用 IPv6，以 TCP/IPv4 连接。这是 IPv4 直连，并未内置桌面 iKuuu 代理：如果手机网络无法直连 ChatGPT，还需要可用的代理方案。macOS 当前既有 IPv4 代理设置不受安卓版影响。
 
@@ -58,3 +58,7 @@ ANDROID_SERIAL=emulator-5580 python3 android/tests/device/lifecycle-test.py
 华为/荣耀：应用启动管理中关闭自动管理，允许自启动、关联启动、后台活动。小米：允许自启动、省电无限制。vivo/iQOO：允许自启动与后台高耗电。OPPO/一加/realme：允许自启动、后台活动，取消耗电限制。三星：加入从不休眠的应用。各品牌可在最近任务锁定 V6Only。
 
 这些入口不能代替用户授权，也不能绕过厂商清理、系统强制停止或与其他 VPN 的互斥限制。厂商识别与入口回退已在自动测试中覆盖；真实品牌手机仍需实机验证。华为仅支持可安装 Android APK 的系统，纯 HarmonyOS NEXT 不支持。
+
+## 2.1.1 IPv4 连通性修复
+
+修复 2.1.0 把公共 DNS 当作必需依赖的问题：网络 DNS 已给出正常 A 和无 AAAA 答案，公共 DNS 被拒绝、超时或返回 SERVFAIL 时，不再把整个 Android DNS 答案转换为 SERVFAIL。已查到 AAAA 的目标仍保持仅 IPv6，不在连接失败时回退 IPv4。模拟器隧道用例现在显式配置不可用的补充 DNS，覆盖 IPv4 TCP/UDP、双栈 IPv6、统计和停止恢复。版本码 9，签名沿用 2.1.0，可覆盖升级。

@@ -35,7 +35,7 @@ The disposable device script disables public captive-portal probes and explicitl
 ANDROID_SERIAL=emulator-5580 V6ONLY_ANDROID_ABIS=arm64-v8a V6ONLY_TEST_SUITE=tunnel bash android/device-test.sh
 ```
 
-This creates `v6only-fixture.apk`, using the same production `establishTunnel`, `closeTun`, JNI and physical-socket protection implementation. A test-only service supplies the emulator network and controlled DNS in place of campus discovery. Fixture services, activity and manifest entries are absent from production builds and cannot be signed using the release-key build option. CI inspects the production manifest for leakage.
+This creates `v6only-fixture.apk`, using the same production `establishTunnel`, `closeTun`, JNI and physical-socket protection implementation. A test-only service supplies the emulator network and controlled DNS in place of campus discovery. The supplemental resolver points to an unavailable host port, so the IPv4-only case also guards against public-DNS failures discarding valid network-DNS answers. Fixture services, activity and manifest entries are absent from production builds and cannot be signed using the release-key build option. CI inspects the production manifest for leakage.
 
 Loopback fixture servers on the host provide controlled IPv4/IPv6 endpoints and DNS at port 15353. The emulator accesses them via 10.0.2.2 and fec0::2. Tests exercise real Android VPN routes, A queries over TCP/UDP, IPv4-entry flows upgraded to IPv6, IPv4-only origins, explicit IPv6 failure without IPv4 fallback, native diagnostics, and physical connectivity after stop. No host route, DNS or firewall settings are modified.
 

@@ -227,9 +227,23 @@ func (r *Router) queryOnce(ctx context.Context, host string, qtype uint16) (*dns
 				}
 			}
 		}
-		// NODATA from campus DNS is rechecked over IPv6, never treated as
-		// proof of an IPv4-only public CDN without this second lookup.
-		return r.queryServers(ctx, host, qtype, r.cfg.IPv6DNS, true)
+		// Supplement missing public AAAA records, but do not turn a working
+		// network resolver's NODATA into SERVFAIL when public DNS is blocked.
+		// Bound this optional check below Android's DNS retry interval.
+		checkCtx := ctx
+		if e == nil {
+			var cancel context.CancelFunc
+			checkCtx, cancel = context.WithTimeout(ctx, time.Second)
+			defer cancel()
+		}
+		public, publicErr := r.queryServers(checkCtx, host, qtype, r.cfg.IPv6DNS, true)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if publicErr != nil && e == nil {
+			return campus, nil
+		}
+		return public, publicErr
 	}
 	return r.queryServers(ctx, host, qtype, r.cfg.DNS, false)
 }

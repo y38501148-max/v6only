@@ -48,7 +48,9 @@ jobs:
 
       - name: 校园边界与设置回滚回归测试（模拟系统 API）
         shell: pwsh
-        run: ./windows/test.ps1
+        run: |
+          ./windows/test.ps1
+          ./windows/test-adapter-wait.ps1
       - name: Disposable VM actual Wintun and failure recovery
         shell: pwsh
         run: ./windows/integration-test.ps1

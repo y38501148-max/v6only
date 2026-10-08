@@ -103,7 +103,10 @@ function Wait-ForwardingAdapter([string]$Name) {
             $interfaces=@(Get-NetIPInterface -InterfaceIndex $adapter.ifIndex -ErrorAction Stop)
             if($adapter.Status -eq 'Up' -and @($interfaces|Where-Object AddressFamily -in @('IPv4','IPv6')).Count -ge 2){return $adapter}
         }
-        catch { Start-Sleep -Milliseconds 250 }
+        catch { }
+        # WMI can return the adapter successfully before it is Up or before
+        # both IP interfaces exist. Those states need the same retry delay.
+        Start-Sleep -Milliseconds 250
     }
     throw "Forwarding adapter $Name is unavailable after driver start"
 }

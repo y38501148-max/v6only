@@ -21,6 +21,25 @@ try{
  RPC @{action='status'}|ConvertTo-Json -Depth 12|Set-Content "$out/status.json"
  $bad=$false;try{RPC @{action='arbitrary-shell';url='whoami'}}catch{$bad=$true};if(!$bad){throw 'RPC allowlist missing'}
  $installed=Join-Path $env:ProgramFiles 'V6Only'
+ # Run the exact installer invoked by the desktop button, including recovery
+ # from a disabled/stopped service and from a missing service registration.
+ $installer=Join-Path $installed 'windows/desktop-install.ps1'
+ if(!(Test-Path $installer)){throw 'Desktop service installer was not bundled'}
+ Write-Host 'CHECK: desktop installer restores disabled service'
+ Stop-Service V6Only
+ Set-Service V6Only -StartupType Disabled
+ & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installer
+ if($LASTEXITCODE -ne 0 -or (Get-Service V6Only).Status -ne 'Running'){throw 'Desktop installer failed to start disabled service'}
+ RPC @{action='status'}|Out-Null
+ Write-Host 'CHECK: desktop installer recreates missing service'
+ Stop-Service V6Only
+ & sc.exe delete V6Only
+ if($LASTEXITCODE -ne 0){throw 'Could not remove fixture service registration'}
+ $service.Dispose()
+ for($i=0;$i -lt 40;$i++){if(!(Get-Service V6Only -ErrorAction SilentlyContinue)){break};Start-Sleep -Milliseconds 250}
+ & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installer
+ if($LASTEXITCODE -ne 0 -or (Get-Service V6Only).Status -ne 'Running'){throw 'Desktop installer failed to recreate service'}
+ RPC @{action='status'}|Out-Null
  $gui=Get-ChildItem $installed -Filter '*.exe'|Where-Object Name -ne 'v6service.exe'|Select-Object -First 1
  if(!$gui){throw 'Desktop executable missing'}
  $app=Start-Process $gui.FullName -PassThru;Start-Sleep 5;if($app.HasExited){throw 'Desktop GUI exited during launch'};Stop-Process $app.Id -Force
@@ -54,4 +73,4 @@ $after=@(Get-DnsClientServerAddress|Where-Object InterfaceIndex -in $baselineInd
 if($baseline -ne $after){throw 'DNS was not restored after uninstall'}
 $owned=Get-NetAdapter -Name 'v6only-tun' -ErrorAction SilentlyContinue
 if($owned -and @(Get-NetRoute -InterfaceIndex $owned.ifIndex -ErrorAction SilentlyContinue|Where-Object DestinationPrefix -in @('0.0.0.0/1','128.0.0.0/1','::/1','8000::/1')).Count){throw 'Owned routes left behind'}
-Write-Host 'PASS: MSI installation, service IPC, GUI launch, Wintun IPv4, persistent traffic, uninstall and DNS/routes recovery'
+Write-Host 'PASS: MSI installation, desktop service repair/recreation, service IPC, GUI launch, Wintun IPv4, persistent traffic, uninstall and DNS/routes recovery'
