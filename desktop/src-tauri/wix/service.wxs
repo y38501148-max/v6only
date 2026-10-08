@@ -3,7 +3,7 @@
  <Fragment>
   <DirectoryRef Id="INSTALLDIR">
    <Component Id="V6OnlyServiceComponent" Guid="B7168D3F-52E5-4BD6-B601-AE5ADB50D9AF" Win64="yes">
-    <File Id="V6OnlyServiceExe" Source="$(env.V6ONLY_SERVICE_EXE)" Name="v6service.exe" KeyPath="yes" />
+    <File Id="V6OnlyServiceExe" Source="$(env.TAURI_V6ONLY_SERVICE_EXE)" Name="v6service.exe" KeyPath="yes" />
     <ServiceInstall Id="V6OnlyInstallService" Name="V6Only" DisplayName="V6Only" Description="V6Only network routing and traffic records" Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" />
     <ServiceControl Id="V6OnlyControlService" Name="V6Only" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
    </Component>
