@@ -14,7 +14,7 @@ IPv6 转发与流量记录工具，提供 macOS、Android 和 Windows 桌面/移
 
 ## 网络行为
 
-目标有 AAAA 地址时只连接 IPv6，不因连接失败而回退 IPv4；成功确认没有 AAAA 的目标允许 IPv4。公共 DNS 补充查询用于解决部分网络 DNS 隐藏视频 CDN 的 IPv6 地址问题。网络本身需要具备可用 IPv6，工具不能让只有 IPv4 的远端服务器凭空支持 IPv6。
+目标有 AAAA 地址时只连接 IPv6，不因连接失败而回退 IPv4；成功确认没有 AAAA 的目标允许 IPv4。公共 DNS 补充查询用于解决部分网络 DNS 隐藏视频 CDN 的 IPv6 地址问题。2.1.1 起，网络 DNS 已成功确认无 AAAA 时，补充查询最多等待 1 秒，公共 DNS 故障不再丢弃有效答案；两组 DNS 都失败仍报错。网络本身需要具备可用 IPv6，工具不能让只有 IPv4 的远端服务器凭空支持 IPv6。
 
 ChatGPT / OpenAI 相关域名保持 IPv4。当前 macOS 版本保留原有 127.0.0.1:7890 HTTP 代理例外；Android 和 Windows 使用直接 IPv4 例外。工具不会提供额外的跨地区代理服务。其他 VPN、加密代理、ECH 或无法识别域名的连接有相应限制，详见平台说明。
 
@@ -38,6 +38,7 @@ cd ..
 python3 -m unittest discover -s tests -p test_macos.py
 bash android/test.sh
 node --check desktop/ui/app.js
+node --test desktop/tests/*.test.cjs
 ```
 
 macOS 构建：`bash scripts/build-desktop-macos.sh`。Android 构建：`bash android/build-apk.sh`，需要 JDK 17+、SDK API 36、NDK 29；正式发布可以通过 `V6ONLY_KEYSTORE`、`V6ONLY_STORE_PASSWORD`、`V6ONLY_KEY_PASSWORD` 指定签名密钥。密钥不进入 Git。

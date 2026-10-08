@@ -14,7 +14,7 @@ fn rpc(q:Value)->Result<Value,String>{
   loop {match std::fs::OpenOptions::new().read(true).write(true).open(r"\\.\pipe\v6only-desktop") {
    Ok(stream)=>break stream,
    Err(error) if error.raw_os_error()==Some(231) && attempts<30=>{attempts+=1;std::thread::sleep(std::time::Duration::from_millis(100));},
-   Err(_)=>return Err("后台服务尚未启动，请重新安装或启动 V6Only 服务。".to_string())
+   Err(error)=>return Err(format!("无法连接后台服务，请点击「安装并启用」恢复服务。系统错误：{}",error))
   }}
  };
  #[cfg(unix)]
@@ -33,7 +33,18 @@ async fn service(action:String,from:Option<i64>,to:Option<i64>,url:Option<String
 #[tauri::command]
 async fn install_service(app:tauri::AppHandle)->Result<Value,String>{
  #[cfg(windows)]
- { let _=app; return rpc(json!({"action":"status"})); }
+ {
+  use std::os::windows::process::CommandExt;
+  let installer=app.path().resource_dir().map_err(|e|e.to_string())?.join("windows/desktop-install.ps1");
+  tauri::async_runtime::spawn_blocking(move||{
+   if !installer.is_file(){return Err("后台服务安装脚本缺失，请重新安装完整 MSI。".to_string())}
+   let output=std::process::Command::new("powershell.exe")
+    .args(["-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File"])
+    .arg(installer).creation_flags(0x08000000).output().map_err(|e|e.to_string())?;
+   if !output.status.success(){return Err(format!("后台服务配置未完成：{}",String::from_utf8_lossy(&output.stderr).trim()))}
+   rpc(json!({"action":"status"}))
+  }).await.map_err(|e|e.to_string())?
+ }
  #[cfg(unix)]
  {
  let resource=app.path().resource_dir().map_err(|e|e.to_string())?.join("macos/desktop-install.sh");

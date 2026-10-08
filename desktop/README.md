@@ -69,7 +69,7 @@ node --check desktop/ui/app.js
 
 DNS 按 TTL 缓存并合并同一问题的并发请求，避免大量重复 AAAA 查询拖慢播放；公共 IPv6 DNS 故障不会被误判为仅 IPv4。
 
-## Windows 2.1.0
+## Windows 2.1.1
 
 Windows 10 1903+ / Windows 11 x64，通过 MSI 安装 Tauri 界面、Wintun、Go 转发核心和 V6Only 系统服务。安装时由 Windows 提供管理员授权；之后普通用户可在界面开启、停止、检测和导出流量。后台启动记住上次开启状态，关闭窗口不会停止连接。卸载先停止服务，还原自有 DNS/路由，再删除服务。历史数据库保留在 `%ProgramData%\v6only\traffic.sqlite`，便于重新安装后查看。
 
@@ -78,3 +78,11 @@ Windows 默认覆盖活动物理网卡，使用该网卡原有 DNS 和公共 IPv
 后台通过本机命名管道通讯，拒绝网络登录访问，只向本地交互用户开放固定的状态、开启、停止、统计、检测操作，不允许任意命令或路径。应用和服务文件位于受系统保护的 Program Files；网络恢复与卸载验证在 GitHub Windows 虚拟机运行。
 
 构建：`scripts/build-desktop-windows.ps1`。macOS DMG：`bash scripts/build-desktop-macos.sh`。
+
+## 2.1.1 Android / Windows 修复
+
+Windows 的“安装并启用”现在调用随 MSI 安装的固定脚本：按需请求 UAC 授权，创建缺失的 V6Only 服务或启动被停用的服务，等待服务运行，再启用转发。日常开启/关闭仍通过本机服务进行，无需把整个界面长期以管理员身份运行。状态读取失败保留具体错误，不再一律解释成缺少管理员权限。
+
+修复 Wintun 已被 WMI 枚举但尚未 Up / 未完成 IPv4、IPv6 注册时重试不等待的问题。CI 验证服务停止/禁用和注册删除后的恢复、真实 Wintun IPv4 转发及卸载网络恢复。
+
+补充 DNS 查询现在是有时限的补充步骤：网络 DNS 已确认无 AAAA 而公共 DNS 不通时，保留有效答案；两组 DNS 都失败仍报错，已查到 AAAA 的目标仍禁止 IPv4 连接回退。该修订适用于 2.1.1 构建的核心；本次发布 Android APK 和 Windows MSI，macOS 安装包仍为 2.1.0。

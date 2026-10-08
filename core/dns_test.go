@@ -82,7 +82,8 @@ func FuzzParseSNI(f *testing.F) {
 }
 
 // Campus DNS can return NODATA even when a public IPv6 resolver discovers
-// a usable CDN AAAA. Keep campus portal split DNS and fail closed on errors.
+// a usable CDN AAAA. Keep campus portal split DNS and preserve valid NODATA
+// when the optional public resolver fails.
 func TestIPv6DNSDiscoversCDNAndPreservesCampus(t *testing.T) {
 	start := func(public bool) string {
 		l, e := net.ListenPacket("udp4", "127.0.0.1:0")
@@ -117,8 +118,8 @@ func TestIPv6DNSDiscoversCDNAndPreservesCampus(t *testing.T) {
 	if e != nil || len(campus.V6) != 0 || len(campus.V4) != 1 {
 		t.Fatal(campus, e)
 	}
-	if _, e = r.Resolve(context.Background(), "failure.test"); e == nil {
-		t.Fatal("public AAAA failure incorrectly allowed IPv4")
+	if result, err := r.Resolve(context.Background(), "failure.test"); err != nil || len(result.V4) != 1 || len(result.V6) != 0 {
+		t.Fatal("public AAAA failure discarded network NODATA", result, err)
 	}
 	q := new(dns.Msg)
 	q.SetQuestion("cdn.bilivideo.com.", dns.TypeAAAA)

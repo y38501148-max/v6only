@@ -20,7 +20,10 @@ jobs:
         with: {workspaces: 'desktop/src-tauri -> target', cache-on-failure: true}
       - name: Build desktop, service and MSI
         shell: pwsh
-        run: ./scripts/build-desktop-windows.ps1
+        run: |
+          node --test desktop/tests/*.test.cjs
+          ./windows/test-adapter-wait.ps1
+          ./scripts/build-desktop-windows.ps1
       - name: Verify MSI installation, service IPC, UI launch and network restoration
         shell: pwsh
         run: ./windows/test-msi.ps1
