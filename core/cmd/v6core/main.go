@@ -32,6 +32,7 @@ func run() error {
 	chatIPv4 := flag.Bool("chatgpt-ipv4", false, "keep ChatGPT connections on IPv4")
 	chatProxy := flag.String("chatgpt-proxy", "", "ChatGPT IPv4 local HTTP proxy exception")
 	ipv6DNS := flag.String("ipv6-dns", "", "IPv6 DNS servers for global AAAA lookups; campus domains retain campus DNS")
+	neteaseIPv6 := flag.Bool("netease-ipv6", false, "use verified official IPv6 CDN aliases for NetEase m701/m801 audio")
 	dev := flag.String("device", "", "TUN name; empty for proxy/probe only")
 	dnsListen := flag.String("dns-listen", "", "loopback DNS endpoint")
 	statsPath := flag.String("stats-db", "", "persistent traffic SQLite database")
@@ -48,6 +49,7 @@ func run() error {
 		return nil
 	}
 	cfg := core.Config{ChatGPTIPv4: *chatIPv4, ChatGPTProxy: *chatProxy, DNS: strings.Split(*dns, ","), Interface: *iface, FakeDNS: *fakeDNS}
+	cfg.NeteaseIPv6 = *neteaseIPv6
 	if *ipv6DNS != "" {
 		cfg.IPv6DNS = strings.Split(*ipv6DNS, ",")
 	}

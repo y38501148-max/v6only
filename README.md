@@ -1,5 +1,7 @@
 # V6Only
 
+macOS 2.1.6：默认启用网易云音乐 `m701/m801` 官方音频 CDN 的 IPv6 解析，动态选择移动/联通节点，保留原始 HTTPS 校验。详情见 [网易云 IPv6 说明](docs/netease-ipv6.md)。
+
 IPv6 转发与流量记录工具，提供 macOS、Android 和 Windows 桌面/移动应用。
 
 [下载安装包](https://github.com/y38501148-max/v6only/releases/latest) · [Android 使用说明](android/README.md) · [桌面版说明](desktop/README.md)

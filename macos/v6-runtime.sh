@@ -95,6 +95,7 @@ start_core() {
 <string>--dns</string><string>202.112.128.50,202.112.128.51</string>
 <string>--chatgpt-proxy</string><string>127.0.0.1:7890</string>
 <string>--ipv6-dns</string><string>2400:3200::1,2400:3200:baba::1,223.5.5.5,223.6.6.6</string>
+<string>--netease-ipv6</string>
 <string>--device</string><string>utun</string>
 <string>--ready</string><string>$CORE_READY</string>
 <string>--stats-db</string><string>$STATE_DIR/traffic.sqlite</string>
