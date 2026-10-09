@@ -20,6 +20,7 @@ import (
 type Config struct {
 	DNS             []string `json:"dns"`
 	IPv6DNS         []string `json:"ipv6_dns,omitempty"`
+	NeteaseIPv6     bool     `json:"netease_ipv6,omitempty"`
 	ChatGPTProxy    string   `json:"chatgpt_proxy,omitempty"`
 	ChatGPTIPv4     bool     `json:"chatgpt_ipv4,omitempty"`
 	StatsDB         string   `json:"stats_db,omitempty"`
@@ -216,6 +217,14 @@ func (r *Router) cachedQuery(ctx context.Context, key string, lookup func() (*dn
 	return nil, e
 }
 func (r *Router) queryOnce(ctx context.Context, host string, qtype uint16) (*dns.Msg, error) {
+	if qtype == dns.TypeAAAA && r.cfg.NeteaseIPv6 && neteaseCDNAlias(host) != "" {
+		if answer, err := r.neteaseAAAA(ctx, host); err == nil {
+			return answer, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
 	if qtype == dns.TypeAAAA && (r.cfg.ChatGPTProxy != "" || r.cfg.ChatGPTIPv4) && isChatGPT(host) {
 		q := new(dns.Msg)
 		q.SetQuestion(dns.Fqdn(host), qtype)
@@ -307,12 +316,22 @@ func (r *Router) queryPublicServers(ctx context.Context, host string, qtype uint
 }
 
 func (r *Router) exchangeDNS(ctx context.Context, host string, qtype uint16, server, proto string) (*dns.Msg, error) {
+	return r.exchangeDNSSubnet(ctx, host, qtype, server, proto, nil)
+}
+
+func (r *Router) exchangeDNSSubnet(ctx context.Context, host string, qtype uint16, server, proto string, subnet net.IP) (*dns.Msg, error) {
 	if _, _, e := net.SplitHostPort(server); e != nil {
 		server = net.JoinHostPort(server, "53")
 	}
 	q := new(dns.Msg)
 	q.SetQuestion(dns.Fqdn(host), qtype)
 	q.SetEdns0(1232, false)
+	if subnet != nil {
+		q.IsEdns0().Option = append(q.IsEdns0().Option, &dns.EDNS0_SUBNET{
+			Code: dns.EDNS0SUBNET, Family: 2, SourceNetmask: 24,
+			Address: append(net.IP(nil), subnet...),
+		})
+	}
 	sub, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	c, e := r.rawDial(sub, proto, server)
