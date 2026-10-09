@@ -88,7 +88,7 @@ func status() any {
 	logs := "控制器：\n" + tail("/var/log/v6only.log", 16) + "\n\n转发核心：\n" + tail("/var/db/v6only/core.log", 24)
 	pac, _ := command("/usr/sbin/networksetup", "-getautoproxyurl", "Wi-Fi")
 	socks, _ := command("/usr/sbin/networksetup", "-getsocksfirewallproxy", "Wi-Fi")
-	return map[string]any{"installed": true, "enabled": valid, "suspended": suspended == nil, "health": h, "watcher_running": strings.Contains(watch, "state = running"), "ipv6_interface": ipv6, "proxy": proxy + secure + socks, "pac": pac, "flows": localJSON("/flows"), "logs": logs, "policy": "ipv6-only-unless-no-aaaa", "version": "2.1.3"}
+	return map[string]any{"installed": true, "enabled": valid, "suspended": suspended == nil, "health": h, "watcher_running": strings.Contains(watch, "state = running"), "ipv6_interface": ipv6, "proxy": proxy + secure + socks, "pac": pac, "flows": localJSON("/flows"), "logs": logs, "policy": "ipv6-only-unless-no-aaaa", "version": "2.1.4"}
 }
 func diagnose(raw string) any {
 	if !strings.Contains(raw, "://") {

@@ -1,4 +1,4 @@
-# V6Only Android 2.1.1
+# V6Only Android 2.1.4
 
 原生 Android 界面 + VpnService 后台服务，复用桌面版 Go 转发核心。支持 Android 10 及以上；APK 包含 arm64-v8a（iQOO 15）和 x86_64。编译/目标 API 36，原生 ELF 已检查为 16 KiB 对齐。
 
@@ -62,3 +62,14 @@ ANDROID_SERIAL=emulator-5580 python3 android/tests/device/lifecycle-test.py
 ## 2.1.1 IPv4 连通性修复
 
 修复 2.1.0 把公共 DNS 当作必需依赖的问题：网络 DNS 已给出正常 A 和无 AAAA 答案，公共 DNS 被拒绝、超时或返回 SERVFAIL 时，不再把整个 Android DNS 答案转换为 SERVFAIL。已查到 AAAA 的目标仍保持仅 IPv6，不在连接失败时回退 IPv4。模拟器隧道用例现在显式配置不可用的补充 DNS，覆盖 IPv4 TCP/UDP、双栈 IPv6、统计和停止恢复。版本码 9，签名沿用 2.1.0，可覆盖升级。
+
+## 2.1.4 IPv6 地址误判修复
+
+修复 iQOO 15 / OriginOS 上 Wi-Fi 已能连接 IPv6，应用却提示“没有可用 IPv6”的问题。
+实机的 `LinkProperties` 同时保留 `IFA_F_TENTATIVE` 和 `IFA_F_OPTIMISTIC`，
+旧版本将所有 TENTATIVE 地址排除。现在遵循 Android 对 optimistic DAD 的可用性判断，
+允许该组合；地址冲突（DADFAILED）、未允许提前使用的 TENTATIVE 地址和非全球地址仍被排除，
+且仍要求所选物理网络提供 IPv6 默认路由。
+
+参考 [Android LinkAddress 的地址状态判断](https://android.googlesource.com/platform/frameworks/base/+/8c702c2d6ae485f71110b9593b25af5367fda220/packages/Connectivity/framework/src/android/net/LinkAddress.java)。
+可用 `ANDROID_SERIAL=<device> bash android/readiness-unit-test.sh` 在 Android 运行时执行不改网络的回归测试。

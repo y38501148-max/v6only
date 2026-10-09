@@ -4,6 +4,21 @@ See [Android 2.0.4](README.md) for the current production lifecycle and new star
 
 Use a disposable Android emulator, never a personal phone. The native core requires Go (see `core/go.mod`), NDK 29.0.13846066, JDK 17+, Android SDK/API 34+ and build-tools. `ANDROID_HOME` locates the SDK.
 
+## Read-only address eligibility unit tests
+
+`ANDROID_SERIAL=<device> bash android/readiness-unit-test.sh` runs only the pure
+`NetworkReadiness` assertions using Android's actual address-flag constants. This
+standalone unit runner can also be used on a USB-debugging phone: it does not
+install an APK, start the VPN, read app data, or change network settings. Its
+temporary DEX file is removed on exit. The integration fixtures below remain
+restricted to disposable emulators.
+
+The assertions cover ordinary and temporary global addresses, optimistic DAD
+(including the iQOO 15 flag combinations `0x45` and `0x144`), unfinished
+non-optimistic DAD, duplicate addresses even with OPTIMISTIC, and non-global
+addresses. The optimistic cases fail against 2.1.3. The same assertions are also
+part of the existing `ReadinessSmoke` instrumentation suite.
+
 ## Production campus gate and lifecycle
 
 ```sh
