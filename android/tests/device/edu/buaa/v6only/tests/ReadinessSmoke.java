@@ -50,7 +50,9 @@ public final class ReadinessSmoke extends Instrumentation {
         check(NetworkReadiness.usableAddress(global, optimistic), "optimistic DAD is usable");
         check(NetworkReadiness.usableAddress(global, optimistic | OsConstants.IFA_F_TEMPORARY),
                 "optimistic temporary address is usable (flags 0x45)");
-        check(NetworkReadiness.usableAddress(global, optimistic | OsConstants.IFA_F_MANAGETEMPADDR),
+        // Use the observed kernel flags directly: IFA_F_MANAGETEMPADDR is not
+        // exposed by OsConstants on Android 10, our oldest supported release.
+        check(NetworkReadiness.usableAddress(global, 0x144),
                 "optimistic managed address is usable (flags 0x144)");
         check(!NetworkReadiness.usableAddress(global, optimistic | OsConstants.IFA_F_DADFAILED),
                 "optimistic flag cannot override a duplicate address");
