@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     v6only for Windows — 校园网感知 v6 优先守护 (v2)
