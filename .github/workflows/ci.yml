@@ -51,6 +51,7 @@ jobs:
         run: |
           ./windows/test.ps1
           ./windows/test-adapter-wait.ps1
+          ./windows/test-desktop-retry.ps1
       - name: Disposable VM actual Wintun and failure recovery
         shell: pwsh
         run: ./windows/integration-test.ps1

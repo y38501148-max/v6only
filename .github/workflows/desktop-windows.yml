@@ -29,6 +29,7 @@ jobs:
         run: |
           node --test desktop/tests/*.test.cjs
           ./windows/test-adapter-wait.ps1
+          ./windows/test-desktop-retry.ps1
           ./scripts/build-desktop-windows.ps1
       - name: Verify MSI installation, service IPC, UI launch and network restoration
         shell: pwsh
