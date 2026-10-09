@@ -24,6 +24,9 @@ jobs:
           Set-Location core
           go test -v -run 'TestAlternateIPv6' ./...
           if($LASTEXITCODE -ne 0){throw 'Alternate IPv6 CDN regression failed'}
+      - name: Verify desktop retry on Windows PowerShell 5.1
+        shell: powershell
+        run: ./windows/test-desktop-retry.ps1
       - name: Build desktop, service and MSI
         shell: pwsh
         run: |
