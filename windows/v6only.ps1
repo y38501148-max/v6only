@@ -266,7 +266,14 @@ function Invoke-V6On {
         Write-Log "campus configuration applied ($why)"
     } catch {
         Invoke-V6Off -Automatic
-        '' | Set-Content $SuspendFlg -Encoding UTF8
+        if ($Desktop) {
+            # Keep the user's enabled state, but give a transient startup failure
+            # time to recover before the service's next takeover attempt.
+            (Get-Date).AddSeconds(60).ToString('o') | Set-Content $SuspendFlg -Encoding UTF8
+            Write-Log "Forwarding startup failed; retry in 60 seconds: $_"
+        } else {
+            '' | Set-Content $SuspendFlg -Encoding UTF8
+        }
         throw
     }
     if (-not $Watch) { Write-Host '转发已启用。' }
@@ -305,6 +312,13 @@ function Invoke-V6Off([switch]$Automatic) {
 function Test-Suspended([string]$path) {
     if (-not (Test-Path $path)) { return $false }
     $until = Get-Content $path -Raw
+    # Older desktop releases wrote an empty marker after startup failures.
+    # Manual desktop disable removes enabled.flag; timed manual pauses still
+    # use a valid timestamp and must retain their original meaning.
+    if ($Desktop -and [string]::IsNullOrWhiteSpace($until)) {
+        Remove-Item $path -Force
+        return $false
+    }
     try {
         if ((Get-Date) -ge [datetime]::Parse($until.Trim())) {
             Remove-Item $path -Force
