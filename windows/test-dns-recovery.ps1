@@ -36,9 +36,9 @@ function Test-CoreActive {return $core}
 function Start-V6Core { $script:core=$true }
 function Stop-V6Core { $script:core=$false;$script:stops++ }
 function Test-Forwarding {}
-function Get-NetFirewallRule {param($DisplayName);foreach($name in @($rules.Keys)){if($name -like $DisplayName){$rules[$name]}}}
-function New-NetFirewallRule {param($DisplayName,$Direction,$Action,$Protocol,$RemotePort,$RemoteAddress,$InterfaceAlias,$Profile);$rules[$DisplayName]=[pscustomobject]@{DisplayName=$DisplayName;Enabled='True'}}
-function Remove-NetFirewallRule {param([Parameter(ValueFromPipeline)]$InputObject);process{if($InputObject){$rules.Remove($InputObject.DisplayName)}}}
+function Get-V6FirewallRule {param($DisplayName);foreach($name in @($rules.Keys)){if($name -like $DisplayName){$rules[$name]}}}
+function New-V6FirewallRule {param($DisplayName,$Direction,$Action,$Protocol,$RemotePort,$RemoteAddress,$InterfaceAlias,$Profile);$rules[$DisplayName]=[pscustomobject]@{DisplayName=$DisplayName;Enabled='True'}}
+function Remove-V6FirewallRule {param([Parameter(ValueFromPipeline)]$InputObject);process{if($InputObject){$rules.Remove($InputObject.DisplayName)}}}
 function PoisonedSnapshot {
  [pscustomobject]@{InterfaceGuid=[string]$physical.InterfaceGuid;AutomaticDns=$false;OriginalDns=@('127.0.0.1');AppliedDns=@('127.0.0.1');PreviousAppliedDns=@('127.0.0.1')}|ConvertTo-Json|Set-Content $Snapshot
  $dns.IPv4=@('127.0.0.1');$dns.IPv6=@();$script:core=$true
