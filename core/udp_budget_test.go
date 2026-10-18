@@ -1,12 +1,58 @@
 package v6core
 
 import (
+	"context"
+	"github.com/miekg/dns"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 	"net"
 	"testing"
 	"time"
 )
+
+func TestIdleDNSConversationsReleaseReservedCapacity(t *testing.T) {
+	r := New(Config{}, nil)
+	defer r.Close()
+	q := new(dns.Msg)
+	q.SetQuestion(healthHost, dns.TypeA)
+	wire, _ := q.Pack()
+	for i := 0; i < 32; i++ {
+		c, peer := budgetConn(t, healthAddress, 53)
+		r.HandleUDP(c)
+		peer.SetDeadline(time.Now().Add(time.Second))
+		if _, err := peer.Write(wire); err != nil {
+			t.Fatal(err)
+		}
+		buf := make([]byte, 4096)
+		n, err := peer.Read(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ans := new(dns.Msg)
+		if err = ans.Unpack(buf[:n]); err != nil || len(ans.Answer) != 1 {
+			t.Fatal("health DNS reply", err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	for len(r.dnsSlots) > 0 {
+		select {
+		case <-ctx.Done():
+			t.Fatal("completed DNS retained reserved capacity")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	c, peer := budgetConn(t, healthAddress, 53)
+	r.HandleUDP(c)
+	peer.SetDeadline(time.Now().Add(time.Second))
+	if _, err := peer.Write(wire); err != nil {
+		t.Fatal("health probe rejected after DNS burst", err)
+	}
+	if _, err := peer.Read(make([]byte, 4096)); err != nil {
+		t.Fatal("health probe failed after DNS burst", err)
+	}
+}
 
 type budgetUDP struct {
 	net.Conn

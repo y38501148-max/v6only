@@ -172,7 +172,10 @@ func (r *Router) udp(c adapter.UDPConn) {
 	if port == 53 {
 		b := make([]byte, 65535)
 		for {
-			c.SetReadDeadline(time.Now().Add(30 * time.Second))
+			// UDP clients usually close after one query, but that close is not
+			// visible over TUN. Reap idle DNS endpoints promptly so completed
+			// queries cannot occupy the reserved budget and starve health probes.
+			c.SetReadDeadline(time.Now().Add(2 * time.Second))
 			n, e := c.Read(b)
 			if e != nil {
 				return
