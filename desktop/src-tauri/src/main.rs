@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod app_update;
 use std::io::{BufRead,BufReader,Write};
 #[cfg(unix)] use std::{os::unix::net::UnixStream,time::Duration,process::Command};
 use serde_json::{Value,json};
@@ -76,4 +77,4 @@ async fn save_export(app:tauri::AppHandle,from:i64,to:i64)->Result<String,String
  std::fs::write(&path,csv).map_err(|e|e.to_string())?;Ok(path.to_string_lossy().into_owned())
  }).await.map_err(|e|e.to_string())?
 }
-fn main(){tauri::Builder::default().invoke_handler(tauri::generate_handler![service,install_service,save_export]).run(tauri::generate_context!()).expect("V6Only failed to run");}
+fn main(){tauri::Builder::default().invoke_handler(tauri::generate_handler![service,install_service,save_export,app_update::check_update,app_update::open_update]).run(tauri::generate_context!()).expect("V6Only failed to run");}

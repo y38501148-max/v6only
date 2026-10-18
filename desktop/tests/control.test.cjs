@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-async function desktop({installed = false, enabled = false, installError, flows = [], statusError = null, busyFailures = 0, version = '2.1.10'} = {}) {
+async function desktop({installed = false, enabled = false, installError, flows = [], statusError = null, busyFailures = 0, version = '2.1.11'} = {}) {
   const elements = new Map(), calls = [];
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
@@ -21,7 +21,7 @@ async function desktop({installed = false, enabled = false, installError, flows 
         assert.equal(element('control').disabled, true, 'disable button during installation');
         if (installError) throw Error(installError);
         installed = true;
-        version = '2.1.10';
+        version = '2.1.11';
         return {installed, enabled};
       }
       if (!installed) throw Error('SERVICE_MISSING: Service not installed');

@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);const invoke=window.__TAURI__?.core.invoke;
-const REQUIRED_SERVICE_VERSION='2.1.10';
+const REQUIRED_SERVICE_VERSION='2.1.11';
 let needsUpgrade=false;
 function needsServiceUpgrade(version){const found=String(version||'').split('.').map(Number),wanted=REQUIRED_SERVICE_VERSION.split('.').map(Number);if(found.length!==3||found.some(n=>!Number.isInteger(n)||n<0))return false;for(let i=0;i<3;i++){if(found[i]!==wanted[i])return found[i]<wanted[i]}return false}
 let installed=null,enabled=false,busy=false,page='overview',range='today',custom=null,lastTotal=null,lastTime=null,polling=false,lastFlows=[],statusEpoch=0;

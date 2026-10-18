@@ -7,4 +7,6 @@ public final class CoreNative {
     public static synchronized native void stop();
     public static synchronized native String flows();
     public static synchronized native String stats(String path, long from, long to);
+    // Network checks never hold the monitor used for VPN start/stop/stats.
+    public static native String checkUpdate(String currentVersion);
 }

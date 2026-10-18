@@ -48,5 +48,5 @@ if($Action -in @('status','enable','disable','fallback-on','fallback-off')){
  $logs=if(Test-Path $LogFile){(Get-Content $LogFile -Tail 30)-join "`n"}else{''}
  if(Test-Path (Join-Path $dir 'service.log')){$logs+="`n"+((Get-Content (Join-Path $dir 'service.log') -Tail 10)-join "`n")}
  $logs+="`n";if(Test-Path (Join-Path $dir 'core-error.log')){$logs+=(Get-Content (Join-Path $dir 'core-error.log') -Tail 20)-join "`n"}
- @{interface_name=$adapter.Name;dns=$physicalDns;installed=$true;allow_ipv4_fallback=(Test-Path (Join-Path $dir 'allow-ipv4-fallback.flag'));enabled=((Test-Path $Marker) -and (Test-CoreActive));suspended=(!(Test-Path $enabled) -or (Test-Suspended $SuspendFlg -ReadOnly));health=$health;flows=$flows;ipv6_interface=(($addresses|ForEach-Object {'inet6 '+$_.IPAddress})-join "`n");proxy='';pac='';logs=$logs;version='2.1.10'}|ConvertTo-Json -Depth 12 -Compress
+ @{interface_name=$adapter.Name;dns=$physicalDns;installed=$true;allow_ipv4_fallback=(Test-Path (Join-Path $dir 'allow-ipv4-fallback.flag'));enabled=((Test-Path $Marker) -and (Test-CoreActive));suspended=(!(Test-Path $enabled) -or (Test-Suspended $SuspendFlg -ReadOnly));health=$health;flows=$flows;ipv6_interface=(($addresses|ForEach-Object {'inet6 '+$_.IPAddress})-join "`n");proxy='';pac='';logs=$logs;version='2.1.11'}|ConvertTo-Json -Depth 12 -Compress
 }

@@ -11,6 +11,7 @@ void core_failed(long long generation, char *message);
 */
 import "C"
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	core "github.com/y38501148-max/v6only/core"
@@ -25,6 +26,17 @@ import (
 var mu sync.Mutex
 var active *core.Tunnel
 var traffic *core.TrafficStore
+
+//export checkAppUpdate
+func checkAppUpdate(current *C.char) *C.char {
+	info, err := core.CheckUpdate(context.Background(), C.GoString(current), "android")
+	var value any = info
+	if err != nil {
+		value = map[string]string{"error": err.Error()}
+	}
+	b, _ := json.Marshal(value)
+	return C.CString(string(b))
+}
 
 type androidLogger struct{}
 

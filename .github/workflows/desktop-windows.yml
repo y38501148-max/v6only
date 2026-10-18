@@ -28,6 +28,7 @@ jobs:
         shell: powershell
         run: |
           ./windows/test-desktop-retry.ps1
+          ./windows/test-firewall-com.ps1
           ./windows/test-dns-recovery.ps1
           ./windows/test-process.ps1
           ./windows/test-connectivity.ps1
@@ -38,6 +39,9 @@ jobs:
           ./windows/test-adapter-wait.ps1
           ./windows/test-desktop-retry.ps1
           ./scripts/build-desktop-windows.ps1
+      - name: Validate desktop update link handling
+        shell: pwsh
+        run: cargo test --manifest-path desktop/src-tauri/Cargo.toml
       - name: Verify MSI installation, service IPC, UI launch and network restoration
         shell: pwsh
         run: ./windows/test-msi.ps1

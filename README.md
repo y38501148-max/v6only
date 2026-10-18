@@ -1,6 +1,6 @@
 # V6Only
 
-2.1.10：启动检查支持独立 HTTPS 站点，避免单站 IPv6 故障导致整体停用；修复 Windows DNS 快照污染及关闭清理，补齐三端网络变化和核心异常恢复；默认严格 IPv6，可手动开启 IPv4 回退。详情见 [网络恢复说明](docs/network-recovery.md)。macOS 继续支持 [网易云音频 IPv6](docs/netease-ipv6.md)。
+2.1.11：合并 PR #18，修复 Windows 大量防火墙规则下的启用超时及广播/P2P UDP 资源耗尽；为 DNS 保留独立会话额度。三端新增稳定版更新提示和对应平台下载入口，详情见[新版本提示](docs/update-notices.md)。继续默认严格 IPv6，用户可手动开启 IPv4 回退。
 
 IPv6 转发与流量记录工具，提供 macOS、Android 和 Windows 桌面/移动应用。
 

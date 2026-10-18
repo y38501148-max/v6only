@@ -59,25 +59,9 @@ jobs:
         shell: pwsh
         run: ./windows/integration-test.ps1
 
-      - name: 防火墙封堵逻辑等价性验证（真实 Windows 防火墙 API）
-        shell: pwsh
-        run: |
-          # CI 的 windows-latest 以管理员跑，可真实操作 NetSecurity 模块
-          # 等价复现 v6only 的封堵规则，验证 API 参数合法
-          $blocked = @('8.8.8.8','8.8.4.4','1.1.1.1','9.9.9.9')
-          try {
-            New-NetFirewallRule -DisplayName 'ci-test-dns-block' -Direction Outbound `
-              -Action Block -Protocol UDP -RemotePort 53 -RemoteAddress $blocked | Out-Null
-            $rule = Get-NetFirewallRule -DisplayName 'ci-test-dns-block'
-            if ($rule.Enabled -ne 'True') { throw "rule not enabled" }
-            # 等价校验：v6only 实际只用 Enabled/Direction/Action，地址过滤单独查
-            $addr = ($rule | Get-NetFirewallAddressFilter)
-            if ($addr.RemoteAddress.Count -lt 1) { throw "remote address filter missing" }
-            Write-Host "✓ 防火墙规则创建/查询成功 (RemoteAddress=$($addr.RemoteAddress -join ','))"
-          } finally {
-            Get-NetFirewallRule -DisplayName 'ci-test-dns-block' -ErrorAction SilentlyContinue |
-              Remove-NetFirewallRule
-          }
+      - name: PR18 actual COM firewall behavior and cleanup
+        shell: powershell
+        run: ./windows/test-firewall-com.ps1
 
       - name: 计划任务注册与停止验证（真实 ScheduledTasks 模块）
         shell: pwsh
@@ -144,7 +128,7 @@ jobs:
           done
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
-      - run: node --check desktop/ui/app.js && node --test desktop/tests/*.test.cjs
+      - run: node --check desktop/ui/app.js && node --check desktop/ui/update.js && node --test desktop/tests/*.test.cjs
       - name: macOS 控制器回归测试（模拟系统命令，不修改 runner 网络）
         run: python3 -m unittest discover -s tests -v
 
@@ -220,7 +204,7 @@ jobs:
           target: google_apis
           disable-animations: true
           # The action runs each script line in its own shell; keep exports together.
-          script: export V6ONLY_ANDROID_ABIS=x86_64 ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-36/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"; for suite in tunnel ui; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done; adb shell am instrument -w edu.buaa.v6only.tests/.BackgroundSmoke | tee android/build/device-tests/background-result.txt; grep -q "PASS:" android/build/device-tests/background-result.txt; python3 android/tests/device/readiness-test.py
+          script: export V6ONLY_ANDROID_ABIS=x86_64 ANDROID_PLATFORM_JAR="$ANDROID_HOME/platforms/android-36/android.jar" ANDROID_BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"; for suite in tunnel ui; do V6ONLY_TEST_SUITE=$suite bash android/device-test.sh || exit 1; done; adb shell am instrument -w edu.buaa.v6only.tests/.UpdateSmoke | tee android/build/device-tests/update-result.txt; grep -q "PASS:" android/build/device-tests/update-result.txt; adb shell am instrument -w edu.buaa.v6only.tests/.BackgroundSmoke | tee android/build/device-tests/background-result.txt; grep -q "PASS:" android/build/device-tests/background-result.txt; python3 android/tests/device/readiness-test.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

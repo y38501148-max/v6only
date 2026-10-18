@@ -40,6 +40,7 @@ public class MainActivity extends Activity {
     private android.widget.CheckBox allowFallback;
     private SharedPreferences prefs;
     private boolean rendering, pending, pendingStart;
+    private AppUpdates appUpdates;
     private final java.util.concurrent.ExecutorService statsWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
     private boolean statsPending;
     private final Runnable statsTick = new Runnable() { public void run() { refreshTotals(); handler.postDelayed(this, 5000); } };
@@ -53,6 +54,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("v6only", MODE_PRIVATE);
         setContentView(R.layout.activity_main);
+        appUpdates = new AppUpdates(this);
         findViewById(R.id.scroll).setOnApplyWindowInsetsListener((v,insets) -> {
             android.graphics.Insets bars = insets.getSystemWindowInsets();
             v.setPadding(bars.left,bars.top,bars.right,bars.bottom); return insets;
@@ -235,18 +237,21 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        appUpdates.resume();
         if (prefs.getBoolean("enabled", false)) sendCommand(V6VpnService.ACTION_APPLY);
         refresh();
         handler.removeCallbacks(statsTick); handler.post(statsTick);
     }
 
     @Override protected void onStop() {
+        appUpdates.pause();
         handler.removeCallbacks(statsTick);
         unregisterReceiver(receiver);
         super.onStop();
     }
 
     @Override protected void onDestroy() {
+        appUpdates.close();
         handler.removeCallbacksAndMessages(null);
         statsWorker.shutdown();
         super.onDestroy();

@@ -129,6 +129,7 @@ func Relay(a, b net.Conn) {
 	go copyOne(b, a)
 	wg.Wait()
 }
+
 // Local broadcasts, multicast and link-local datagrams entering the TUN must
 // never be forwarded: they cannot leave the physical interface anyway, and a
 // dorm-LAN broadcast storm exhausts the OS UDP buffer pool (WSAENOBUFS).
@@ -137,28 +138,30 @@ func udpDropped(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() || ip.IsLinkLocalUnicast() || ip.Equal(net.IPv4bcast)
 }
 
-// Upper bound on concurrently forwarded UDP conversations, so peer-to-peer
-// fan-out from local apps cannot starve the OS socket pool.
-var udpSlots = make(chan struct{}, 256)
-
 func (r *Router) HandleUDP(c adapter.UDPConn) {
 	if udpDropped(net.IP(c.ID().LocalAddress.AsSlice())) {
 		c.Close()
 		return
 	}
+	// Keep bounded DNS capacity available even when P2P fills the ordinary pool.
+	// Budgets belong to a router, so core recreation cannot inherit stale slots.
+	slots := r.udpSlots
+	if c.ID().LocalPort == 53 {
+		slots = r.dnsSlots
+	}
 	select {
-	case udpSlots <- struct{}{}:
+	case slots <- struct{}{}:
 	default:
 		c.Close()
 		return
 	}
 	if r.track(c) {
 		go func() {
-			defer func() { <-udpSlots }()
+			defer func() { <-slots }()
 			r.udp(c)
 		}()
 	} else {
-		<-udpSlots
+		<-slots
 	}
 }
 func (r *Router) udp(c adapter.UDPConn) {

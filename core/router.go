@@ -83,6 +83,8 @@ type Router struct {
 	LookupOverride func(context.Context, string) (Result, error)
 	DialOverride   func(context.Context, string, string) (net.Conn, error)
 	Traffic        *TrafficStore
+	udpSlots       chan struct{}
+	dnsSlots       chan struct{}
 }
 
 func New(cfg Config, control func(string, string, syscall.RawConn) error) *Router {
@@ -90,7 +92,7 @@ func New(cfg Config, control func(string, string, syscall.RawConn) error) *Route
 		cfg.FamilyTimeoutMS = 5000
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Router{cfg: cfg, ctx: ctx, cancel: cancel, control: control, cache: map[string]cached{}, fake: map[string]string{}, reverse: map[string]reverseEntry{}, fakeReverse: map[string]string{}, next: 1, connections: map[net.Conn]bool{}, queryCache: map[string]dnsCached{}, queryPending: map[string]*dnsPending{}}
+	return &Router{cfg: cfg, ctx: ctx, cancel: cancel, control: control, cache: map[string]cached{}, fake: map[string]string{}, reverse: map[string]reverseEntry{}, fakeReverse: map[string]string{}, next: 1, connections: map[net.Conn]bool{}, queryCache: map[string]dnsCached{}, queryPending: map[string]*dnsPending{}, udpSlots: make(chan struct{}, 256), dnsSlots: make(chan struct{}, 32)}
 }
 func (r *Router) Close() {
 	r.cancel()

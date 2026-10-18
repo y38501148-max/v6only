@@ -44,10 +44,19 @@ func run() error {
 	fakeDNS := flag.Bool("fake-dns", false, "synthetic addresses for an isolated VPN DNS scope (never system-wide desktop DNS)")
 	logFlows := flag.Bool("log-flows", false, "log connection destinations to stdout (off by default)")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	updatePlatform := flag.String("check-update", "", "check releases for windows-x64, macos-arm64 or android")
+	currentVersion := flag.String("current-version", version, "installed app version for release checks")
 	flag.Parse()
 	if *showVersion {
 		fmt.Println(version)
 		return nil
+	}
+	if *updatePlatform != "" {
+		info, err := core.CheckUpdate(context.Background(), *currentVersion, *updatePlatform)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(info)
 	}
 	cfg := core.Config{ChatGPTIPv4: *chatIPv4, ChatGPTProxy: *chatProxy, DNS: strings.Split(*dns, ","), Interface: *iface, FakeDNS: *fakeDNS}
 	cfg.NeteaseIPv6 = *neteaseIPv6
