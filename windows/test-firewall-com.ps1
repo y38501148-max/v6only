@@ -1,14 +1,16 @@
 # Only run on disposable Windows CI: validate the actual helpers used by PR #18.
 $ErrorActionPreference='Stop'
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'v6only.ps1'),[ref]$null,[ref]$null)
-foreach($name in @('Get-V6FirewallRule','New-V6FirewallRule','Remove-V6FirewallRule')){
+foreach($name in @('Get-V6FirewallRule','New-V6FirewallRule','Remove-V6FirewallRule','Get-ActiveAdapter')){
  $fn=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$false)
  if(!$fn){throw "Missing helper $name"}
  . ([scriptblock]::Create($fn.Extent.Text))
 }
 $prefix='ci-v6only-com-'+[guid]::NewGuid().ToString('N')
-$adapter=Get-NetAdapter|Where-Object Status -eq 'Up'|Select-Object -First 1
-if(!$adapter){throw 'No active adapter'}
+# Use the same routed physical adapter as production, not an arbitrary Up VF/vNIC.
+$adapter=Get-ActiveAdapter
+if(!$adapter){throw 'No routed physical adapter'}
+Write-Host "CHECK: COM firewall on $($adapter.Name), index=$($adapter.ifIndex), guid=$($adapter.InterfaceGuid)"
 try{
  foreach($protocol in @('UDP','TCP')){
   $name=$prefix+'-'+$protocol

@@ -8,9 +8,21 @@ $baseline=@(Get-DnsClientServerAddress|Where-Object InterfaceIndex -in $baseline
 $baseline | Set-Content "$out/baseline.json"
 Remove-Item "$out/watchdog.done","$out/watchdog-restored.flag" -ErrorAction SilentlyContinue
 $watchdog=Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot/test-msi-watchdog.ps1`" -Out `"$out`"" -WindowStyle Hidden -PassThru
-function RPC($request){
+function RPCOnce($request){
  $pipe=[IO.Pipes.NamedPipeClientStream]::new('.','v6only-desktop',[IO.Pipes.PipeDirection]::InOut)
  try{$pipe.Connect(10000);$writer=[IO.StreamWriter]::new($pipe,[Text.UTF8Encoding]::new($false),4096,$true);$writer.AutoFlush=$true;$writer.WriteLine(($request|ConvertTo-Json -Compress));$reader=[IO.StreamReader]::new($pipe);$reply=$reader.ReadLine()|ConvertFrom-Json;if(!$reply.ok){throw $reply.error};return $reply.data}finally{$pipe.Dispose()}
+}
+# Match the desktop's bounded retry when the watcher owns the network operation.
+# Only SERVICE_BUSY is retried; all other service errors fail immediately.
+function RPC($request){
+ $deadline=[DateTime]::UtcNow.AddSeconds(80)
+ for(;;){
+  try{return RPCOnce $request}catch{
+   if($_.Exception.Message -notlike 'SERVICE_BUSY:*' -or [DateTime]::UtcNow -ge $deadline){throw}
+   Write-Host "WAIT: $($request.action) for network operation"
+   Start-Sleep -Seconds 1
+  }
+ }
 }
 try{
  Write-Host 'CHECK: install MSI'
