@@ -59,17 +59,17 @@ function Start-V6Core {
     if ($script:FailCore) { throw 'Simulated core readiness timeout' }
 }
 function Stop-V6Core { $script:FakeCore = $false }
-function Get-NetFirewallRule {
+function Get-V6FirewallRule {
     param($DisplayName)
     foreach ($key in @($script:FakeRules.Keys)) {
         if ($key -like $DisplayName) { $script:FakeRules[$key] }
     }
 }
-function New-NetFirewallRule {
+function New-V6FirewallRule {
     param($DisplayName, $Direction, $Action, $Protocol, $RemotePort, $RemoteAddress, $InterfaceAlias, $Profile)
     $script:FakeRules[$DisplayName] = [pscustomobject]@{DisplayName=$DisplayName;Enabled='True'}
 }
-function Remove-NetFirewallRule {
+function Remove-V6FirewallRule {
     param([Parameter(ValueFromPipeline)]$InputObject)
     process { if ($InputObject) { $script:FakeRules.Remove($InputObject.DisplayName) } }
 }

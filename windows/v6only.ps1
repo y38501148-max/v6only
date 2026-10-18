@@ -47,6 +47,41 @@ function Write-Log([string]$msg) {
     "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg" | Out-File $LogFile -Append -Encoding utf8
 }
 
+# NetSecurity cmdlets enumerate the whole policy store on every call, which
+# takes tens of seconds on hosts with large rule sets and overruns the service
+# timeout. The COM policy object is equivalent (rule Name == DisplayName) and
+# answers in well under a second.
+function Get-V6FirewallRule {
+    [CmdletBinding()] param([string]$DisplayName)
+    $policy = New-Object -ComObject HNetCfg.FwPolicy2
+    # Materialize before returning so piped removals never mutate a live enumeration.
+    $found = @(foreach ($rule in $policy.Rules) {
+        if ($rule.Name -like $DisplayName) {
+            [pscustomobject]@{DisplayName=$rule.Name; Enabled=[string]$rule.Enabled}
+        }
+    })
+    $found
+}
+function Remove-V6FirewallRule {
+    param([Parameter(ValueFromPipeline)]$InputObject)
+    begin { $policy = New-Object -ComObject HNetCfg.FwPolicy2 }
+    process { if ($InputObject) { $policy.Rules.Remove($InputObject.DisplayName) } }
+}
+function New-V6FirewallRule {
+    [CmdletBinding()] param($DisplayName, $Direction, $Action, $Protocol, $RemotePort, $RemoteAddress, $InterfaceAlias, $Profile)
+    $rule = New-Object -ComObject HNetCfg.FWRule
+    $rule.Name = $DisplayName
+    $rule.Direction = if ($Direction -eq 'Inbound') { 1 } else { 2 }
+    $rule.Action = if ($Action -eq 'Allow') { 1 } else { 0 }
+    $rule.Protocol = if ($Protocol -eq 'TCP') { 6 } else { 17 }
+    $rule.RemotePorts = [string]$RemotePort
+    $rule.RemoteAddresses = @($RemoteAddress) -join ','
+    $rule.Interfaces = [object[]]@($InterfaceAlias)
+    $rule.Profiles = 0x7FFFFFFF
+    $rule.Enabled = $true
+    (New-Object -ComObject HNetCfg.FwPolicy2).Rules.Add($rule)
+}
+
 function Stop-V6Task([string]$TaskName = 'v6only-watch') {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $task) { return }
@@ -384,8 +419,8 @@ function Invoke-V6On {
         $script:ManagedDns = @($current | Where-Object { -not (Test-LocalDns @($_)) })
         if (-not $ManagedDns) { throw 'Waiting for physical DNS servers' }
     }
-    $udp = Get-NetFirewallRule -DisplayName 'v6only-block-external-dns' -ErrorAction SilentlyContinue
-    $tcp = Get-NetFirewallRule -DisplayName 'v6only-block-external-dns-tcp' -ErrorAction SilentlyContinue
+    $udp = Get-V6FirewallRule -DisplayName 'v6only-block-external-dns' -ErrorAction SilentlyContinue
+    $tcp = Get-V6FirewallRule -DisplayName 'v6only-block-external-dns-tcp' -ErrorAction SilentlyContinue
     if ($state -and ($current -join ',') -eq ($ManagedDns -join ',') -and
         $udp.Enabled -eq 'True' -and $tcp.Enabled -eq 'True' -and (Test-Path $Marker) -and (Test-CoreActive)) {
         Remove-Item $SuspendFlg -Force -ErrorAction SilentlyContinue
@@ -404,10 +439,10 @@ function Invoke-V6On {
         if (-not $Desktop) { Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $ManagedDns }
         foreach ($protocol in @('UDP','TCP')) {
             $name = if ($protocol -eq 'UDP') { 'v6only-block-external-dns' } else { 'v6only-block-external-dns-tcp' }
-            Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+            Get-V6FirewallRule -DisplayName $name -ErrorAction SilentlyContinue | Remove-V6FirewallRule
             $blocked = @($BlockedDnsV4 | Where-Object { -not $Desktop -or $_ -notin $ManagedDns })
             if (-not $blocked) { continue }
-            New-NetFirewallRule -DisplayName $name -Direction Outbound -Action Block `
+            New-V6FirewallRule -DisplayName $name -Direction Outbound -Action Block `
                 -Protocol $protocol -RemotePort 53 -RemoteAddress $blocked `
                 -InterfaceAlias $adapter.Name -Profile Any | Out-Null
         }
@@ -469,7 +504,7 @@ function Invoke-V6Off([switch]$Automatic) {
     # Every cleanup step runs even if the original interface is absent or the
     # snapshot is unreadable. Failed restoration keeps the recovery information.
     try { Stop-V6Core } catch { if (-not $restoreError) { $restoreError = $_ }; Write-Log "Core cleanup failed: $_" }
-    try { Get-NetFirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
+    try { Get-V6FirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue | Remove-V6FirewallRule }
     catch { if (-not $restoreError) { $restoreError = $_ }; Write-Log "Firewall cleanup failed: $_" }
     Remove-Item $Marker -Force -ErrorAction SilentlyContinue
     if (-not $restoreError) { Remove-Item $Snapshot -Force -ErrorAction SilentlyContinue }
@@ -583,8 +618,8 @@ switch ($true) {
     $Uninstall {
         Stop-V6Task
         Unregister-ScheduledTask -TaskName 'v6only-watch' -Confirm:$false -ErrorAction SilentlyContinue
-        Get-NetFirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue |
-            Remove-NetFirewallRule
+        Get-V6FirewallRule -DisplayName 'v6only-block-external-dns*' -ErrorAction SilentlyContinue |
+            Remove-V6FirewallRule
         Invoke-V6Off -Automatic
         Remove-Item "$env:ProgramData\v6only" -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "✅ v6only 已卸载并还原网络"

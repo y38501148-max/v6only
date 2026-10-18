@@ -45,16 +45,16 @@ function Set-DnsClientServerAddress {
     $script:FakeWrites++
     $script:FakeDns=if ($ResetServerAddresses) { @('192.168.1.1') } else { @($ServerAddresses) }
 }
-function Get-NetFirewallRule {
+function Get-V6FirewallRule {
     param($DisplayName)
     foreach ($key in @($FakeRules.Keys)) { if ($key -like $DisplayName) { $FakeRules[$key] } }
 }
-function New-NetFirewallRule {
+function New-V6FirewallRule {
     param($DisplayName,$Direction,$Action,$Protocol,$RemotePort,$RemoteAddress,$InterfaceAlias,$Profile)
     $script:FakeWrites++
     $script:FakeRules[$DisplayName]=[pscustomobject]@{DisplayName=$DisplayName;Enabled='True'}
 }
-function Remove-NetFirewallRule {
+function Remove-V6FirewallRule {
     param([Parameter(ValueFromPipeline)]$InputObject)
     process { if ($InputObject) { $script:FakeWrites++; $script:FakeRules.Remove($InputObject.DisplayName) } }
 }
