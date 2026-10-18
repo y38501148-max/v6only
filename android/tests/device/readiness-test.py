@@ -41,6 +41,15 @@ def command(action):
     shell('am', 'start-foreground-service', '-n', 'edu.buaa.v6only/.V6VpnService', '-a', 'edu.buaa.v6only.' + action)
 
 
+def physical_http_restored():
+    # NetworkAgent removal can precede kernel route teardown; check the data path.
+    try:
+        response = shell("printf 'GET / HTTP/1.0\\r\\nHost: fixture\\r\\n\\r\\n' | toybox nc -w 3 10.0.2.2 18766")
+    except subprocess.CalledProcessError as error:
+        response = error.output or ''
+    return 'v6only physical network restored' in response
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -72,8 +81,7 @@ try:
         wait(lambda: not vpn(), 'IPv6 address loss releases VPN routes')
         notification = shell('dumpsys', 'notification', '--noredact')
         assert '当前网络没有可用 IPv6' in notification, 'Missing explicit standby reason'
-        response = shell("printf 'GET / HTTP/1.0\\r\\nHost: fixture\\r\\n\\r\\n' | toybox nc -w 3 10.0.2.2 18766")
-        assert 'v6only physical network restored' in response, response
+        wait(physical_http_restored, 'physical HTTP restores after asynchronous VPN teardown')
         print('PASS: default HTTP works after IPv6 loss; monitor remains active', flush=True)
 except BaseException:
     print(shell('ip', '-6', 'addr', 'show', 'dev', 'wlan0'), flush=True)
