@@ -29,8 +29,9 @@ func (r *Router) dialIPv6(ctx context.Context, host, port string, primary []net.
 	if net.ParseIP(name) != nil {
 		name = r.domain(name)
 	}
-	if name == "" || campusDomain(name) || len(r.cfg.IPv6DNS) == 0 {
-		return r.family(ctx, primary, port, "tcp6")
+	campus := campusDomain(name)
+	if name == "" || campus || len(r.cfg.IPv6DNS) == 0 {
+		return r.family(ctx, primary, port, "tcp6", !campus)
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(r.cfg.FamilyTimeoutMS)*time.Millisecond)
 	defer cancel()
@@ -51,7 +52,7 @@ func (r *Router) dialIPv6(ctx context.Context, host, port string, primary []net.
 			}
 		}()
 	}
-	run(func() (net.Conn, error) { return r.family(ctx, primary, port, "tcp6") })
+	run(func() (net.Conn, error) { return r.family(ctx, primary, port, "tcp6", true) })
 	timer := time.NewTimer(250 * time.Millisecond)
 	defer timer.Stop()
 	pending, launched := 1, false
@@ -87,7 +88,7 @@ func (r *Router) dialIPv6(ctx context.Context, host, port string, primary []net.
 			if len(ips) == 0 {
 				return nil, errors.New("no additional IPv6 addresses")
 			}
-			c, e := r.family(ctx, ips, port, "tcp6")
+			c, e := r.family(ctx, ips, port, "tcp6", false)
 			if e == nil {
 				// Reuse the working edge for subsequent connections, only while
 				// both the original and supplemental DNS answers remain valid.

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/xjasonlyu/tun2socks/v2/dialer"
-	core "github.com/y38501148-max/v6only/core"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,6 +13,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	core "github.com/y38501148-max/v6only/core"
+	"github.com/y38501148-max/v6only/core/internal/physical"
 )
 
 func main() {
@@ -30,6 +31,7 @@ func run() error {
 	iface := flag.String("interface", "", "physical outbound interface (required for TUN)")
 	dns := flag.String("dns", "202.112.128.50,202.112.128.51", "physical DNS IPs, comma-separated")
 	allowFallback := flag.Bool("allow-ipv4-fallback", false, "explicitly allow IPv4 after IPv6 connection failure")
+	racePorts := flag.Int("ipv6-race-ports", core.DefaultRacePorts, "source ports for the primary public IPv6 TCP address (0 disables, max 6)")
 	chatIPv4 := flag.Bool("chatgpt-ipv4", false, "keep ChatGPT connections on IPv4")
 	chatProxy := flag.String("chatgpt-proxy", "", "ChatGPT local HTTP proxy (numeric IPv4 or IPv6 loopback)")
 	ipv6DNS := flag.String("ipv6-dns", "", "IPv6 DNS servers for global AAAA lookups; campus domains retain campus DNS")
@@ -61,10 +63,19 @@ func run() error {
 	cfg := core.Config{ChatGPTIPv4: *chatIPv4, ChatGPTProxy: *chatProxy, DNS: strings.Split(*dns, ","), Interface: *iface, FakeDNS: *fakeDNS}
 	cfg.NeteaseIPv6 = *neteaseIPv6
 	cfg.AllowIPv4Fallback = *allowFallback
+	cfg.Race = &core.RaceConfig{Ports: *racePorts}
 	if *ipv6DNS != "" {
 		cfg.IPv6DNS = strings.Split(*ipv6DNS, ",")
 	}
-	r := core.New(cfg, nil)
+	var control func(string, string, syscall.RawConn) error
+	if *iface != "" {
+		i, e := net.InterfaceByName(*iface)
+		if e != nil {
+			return e
+		}
+		control = physical.Control(i)
+	}
+	r := core.New(cfg, control)
 	defer r.Close()
 	if *statsPath != "" {
 		store, e := core.OpenTraffic(*statsPath)
@@ -73,16 +84,6 @@ func run() error {
 		}
 		r.Traffic = store
 		defer store.Close()
-	}
-	if *iface != "" {
-		i, e := net.InterfaceByName(*iface)
-		if e != nil {
-			return e
-		}
-		opts := &dialer.Options{InterfaceName: i.Name, InterfaceIndex: i.Index}
-		r.DialOverride = func(ctx context.Context, n, a string) (net.Conn, error) {
-			return dialer.DefaultDialer.DialContextWithOptions(ctx, n, a, opts)
-		}
 	}
 	if *probe != "" {
 		client := &http.Client{Timeout: 25 * time.Second, Transport: &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, n, a string) (net.Conn, error) {

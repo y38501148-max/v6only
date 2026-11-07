@@ -8,8 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/xjasonlyu/tun2socks/v2/dialer"
-	core "github.com/y38501148-max/v6only/core"
 	"io"
 	"net"
 	"net/http"
@@ -22,6 +20,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	core "github.com/y38501148-max/v6only/core"
+	"github.com/y38501148-max/v6only/core/internal/physical"
 )
 
 const lib = "/usr/local/lib/v6only"
@@ -90,7 +91,7 @@ func status() any {
 	logs := "控制器：\n" + tail("/var/log/v6only.log", 16) + "\n\n转发核心：\n" + tail("/var/db/v6only/core.log", 24)
 	pac, _ := command("/usr/sbin/networksetup", "-getautoproxyurl", "Wi-Fi")
 	socks, _ := command("/usr/sbin/networksetup", "-getsocksfirewallproxy", "Wi-Fi")
-	return map[string]any{"installed": true, "enabled": valid, "suspended": suspended == nil, "health": h, "watcher_running": strings.Contains(watch, "state = running"), "ipv6_interface": ipv6, "proxy": proxy + secure + socks, "pac": pac, "flows": localJSON("/flows"), "logs": logs, "policy": policy(), "version": "2.1.11", "allow_ipv4_fallback": fallbackEnabled()}
+	return map[string]any{"installed": true, "enabled": valid, "suspended": suspended == nil, "health": h, "watcher_running": strings.Contains(watch, "state = running"), "ipv6_interface": ipv6, "proxy": proxy + secure + socks, "pac": pac, "flows": localJSON("/flows"), "logs": logs, "policy": policy(), "version": "2.1.12", "allow_ipv4_fallback": fallbackEnabled()}
 }
 func chatProxyEndpoint() string {
 	proxy, _ := command("/usr/sbin/networksetup", "-getwebproxy", "Wi-Fi")
@@ -109,16 +110,12 @@ func diagnose(raw string) any {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
-	r := core.New(core.Config{ChatGPTProxy: chatProxyEndpoint(), DNS: []string{"202.112.128.50", "202.112.128.51"}, IPv6DNS: []string{"2400:3200::1", "2400:3200:baba::1", "223.5.5.5", "223.6.6.6"}, Interface: "en0", AllowIPv4Fallback: fallbackEnabled()}, nil)
-	defer r.Close()
 	i, e := net.InterfaceByName("en0")
 	if e != nil {
 		return map[string]any{"error": e.Error()}
 	}
-	opts := &dialer.Options{InterfaceName: i.Name, InterfaceIndex: i.Index}
-	r.DialOverride = func(ctx context.Context, n, a string) (net.Conn, error) {
-		return dialer.DefaultDialer.DialContextWithOptions(ctx, n, a, opts)
-	}
+	r := core.New(core.Config{ChatGPTProxy: chatProxyEndpoint(), DNS: []string{"202.112.128.50", "202.112.128.51"}, IPv6DNS: []string{"2400:3200::1", "2400:3200:baba::1", "223.5.5.5", "223.6.6.6"}, Interface: "en0", AllowIPv4Fallback: fallbackEnabled()}, physical.Control(i))
+	defer r.Close()
 	started := time.Now()
 	resolved, e := r.Resolve(ctx, u.Hostname())
 	v6 := []string{}

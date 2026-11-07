@@ -18,17 +18,18 @@ import (
 )
 
 type Config struct {
-	DNS               []string `json:"dns"`
-	IPv6DNS           []string `json:"ipv6_dns,omitempty"`
-	NeteaseIPv6       bool     `json:"netease_ipv6,omitempty"`
-	ChatGPTProxy      string   `json:"chatgpt_proxy,omitempty"`
-	AllowIPv4Fallback bool     `json:"allow_ipv4_fallback,omitempty"`
-	ChatGPTIPv4       bool     `json:"chatgpt_ipv4,omitempty"`
-	StatsDB           string   `json:"stats_db,omitempty"`
-	Interface         string   `json:"interface"`
-	FamilyTimeoutMS   int      `json:"family_timeout_ms"`
-	FakeDNS           bool     `json:"fake_dns"`
-	Generation        int64    `json:"generation"`
+	DNS               []string    `json:"dns"`
+	IPv6DNS           []string    `json:"ipv6_dns,omitempty"`
+	NeteaseIPv6       bool        `json:"netease_ipv6,omitempty"`
+	ChatGPTProxy      string      `json:"chatgpt_proxy,omitempty"`
+	AllowIPv4Fallback bool        `json:"allow_ipv4_fallback,omitempty"`
+	ChatGPTIPv4       bool        `json:"chatgpt_ipv4,omitempty"`
+	StatsDB           string      `json:"stats_db,omitempty"`
+	Interface         string      `json:"interface"`
+	FamilyTimeoutMS   int         `json:"family_timeout_ms"`
+	FakeDNS           bool        `json:"fake_dns"`
+	Generation        int64       `json:"generation"`
+	Race              *RaceConfig `json:"race,omitempty"`
 }
 type Flow struct {
 	Host          string    `json:"host"`
@@ -85,6 +86,8 @@ type Router struct {
 	Traffic        *TrafficStore
 	udpSlots       chan struct{}
 	dnsSlots       chan struct{}
+	raceWindow     atomic.Uint32
+	racePorts      int
 }
 
 func New(cfg Config, control func(string, string, syscall.RawConn) error) *Router {
@@ -92,7 +95,11 @@ func New(cfg Config, control func(string, string, syscall.RawConn) error) *Route
 		cfg.FamilyTimeoutMS = 5000
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Router{cfg: cfg, ctx: ctx, cancel: cancel, control: control, cache: map[string]cached{}, fake: map[string]string{}, reverse: map[string]reverseEntry{}, fakeReverse: map[string]string{}, next: 1, connections: map[net.Conn]bool{}, queryCache: map[string]dnsCached{}, queryPending: map[string]*dnsPending{}, udpSlots: make(chan struct{}, 256), dnsSlots: make(chan struct{}, 32)}
+	ports := DefaultRacePorts
+	if cfg.Race != nil {
+		ports = min(cfg.Race.Ports, DefaultRacePorts)
+	}
+	return &Router{cfg: cfg, ctx: ctx, cancel: cancel, control: control, cache: map[string]cached{}, fake: map[string]string{}, reverse: map[string]reverseEntry{}, fakeReverse: map[string]string{}, next: 1, connections: map[net.Conn]bool{}, queryCache: map[string]dnsCached{}, queryPending: map[string]*dnsPending{}, udpSlots: make(chan struct{}, 256), dnsSlots: make(chan struct{}, 32), racePorts: ports}
 }
 func (r *Router) Close() {
 	r.cancel()
@@ -145,18 +152,25 @@ func (r *Router) Flows(host string) []Flow {
 	return out
 }
 func (r *Router) JSONFlows(host string) string { b, _ := json.Marshal(r.Flows(host)); return string(b) }
-func (r *Router) rawDial(ctx context.Context, network, address string) (net.Conn, error) {
+func (r *Router) socketDial(ctx context.Context, network, address string, sourcePort int) (net.Conn, error) {
 	var c net.Conn
 	var e error
 	if r.DialOverride != nil {
 		c, e = r.DialOverride(ctx, network, address)
 	} else {
-		c, e = (&net.Dialer{Control: r.control}).DialContext(ctx, network, address)
+		d := net.Dialer{Control: r.control}
+		if sourcePort != 0 {
+			d.LocalAddr = &net.TCPAddr{Port: sourcePort}
+		}
+		c, e = d.DialContext(ctx, network, address)
 	}
 	if e == nil && r.Traffic != nil {
 		c = r.Traffic.Wrap(c)
 	}
 	return c, e
+}
+func (r *Router) rawDial(ctx context.Context, network, address string) (net.Conn, error) {
+	return r.socketDial(ctx, network, address, 0)
 }
 func (r *Router) query(ctx context.Context, host string, qtype uint16) (*dns.Msg, error) {
 	key := fmt.Sprintf("%s/%d", strings.ToLower(strings.TrimSuffix(host, ".")), qtype)
@@ -506,7 +520,7 @@ func (r *Router) addresses(ctx context.Context, host string) (Result, error) {
 	}
 	return r.lookup(ctx, host)
 }
-func (r *Router) family(ctx context.Context, ips []net.IP, port, network string) (net.Conn, error) {
+func (r *Router) family(ctx context.Context, ips []net.IP, port, network string, racePrimary bool) (net.Conn, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -520,12 +534,16 @@ func (r *Router) family(ctx context.Context, ips []net.IP, port, network string)
 		e error
 	}
 	ch := make(chan result)
-	var wg sync.WaitGroup
-	for _, ip := range ips {
-		wg.Add(1)
-		go func(ip net.IP) {
-			defer wg.Done()
-			c, e := r.rawDial(ctx, network, net.JoinHostPort(ip.String(), port))
+	for index, ip := range ips {
+		go func() {
+			address := net.JoinHostPort(ip.String(), port)
+			var c net.Conn
+			var e error
+			if index == 0 && racePrimary && network == "tcp6" && r.canRace(ip) {
+				c, e = r.raceDial(ctx, address)
+			} else {
+				c, e = r.rawDial(ctx, network, address)
+			}
 			select {
 			case ch <- result{c, e}:
 			case <-ctx.Done():
@@ -533,7 +551,7 @@ func (r *Router) family(ctx context.Context, ips []net.IP, port, network string)
 					c.Close()
 				}
 			}
-		}(ip)
+		}()
 	}
 	var last error
 	for range ips {
@@ -558,7 +576,7 @@ func (r *Router) Dial(ctx context.Context, host, port string) (net.Conn, error) 
 		if e != nil {
 			return nil, e
 		}
-		c, e := r.family(ctx, addresses.V4, port, "tcp4")
+		c, e := r.family(ctx, addresses.V4, port, "tcp4", false)
 		if e == nil {
 			r.record(host, c, "tcp4", "chatgpt_ipv4")
 		}
@@ -572,7 +590,7 @@ func (r *Router) Dial(ctx context.Context, host, port string) (net.Conn, error) 
 		c, e := r.dialIPv6(ctx, host, port, addresses.V6)
 		if e != nil {
 			if r.cfg.AllowIPv4Fallback && len(addresses.V4) > 0 && ctx.Err() == nil {
-				c, fallbackErr := r.family(ctx, addresses.V4, port, "tcp4")
+				c, fallbackErr := r.family(ctx, addresses.V4, port, "tcp4", false)
 				if fallbackErr == nil {
 					r.record(host, c, "tcp4", "ipv6_failed_fallback")
 					return c, nil
@@ -588,7 +606,7 @@ func (r *Router) Dial(ctx context.Context, host, port string) (net.Conn, error) 
 	if net.ParseIP(host) != nil {
 		reason = "literal_ipv4"
 	}
-	c, e := r.family(ctx, addresses.V4, port, "tcp4")
+	c, e := r.family(ctx, addresses.V4, port, "tcp4", false)
 	if e == nil {
 		r.record(host, c, "tcp4", reason)
 	}
