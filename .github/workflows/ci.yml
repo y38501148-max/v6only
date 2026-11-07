@@ -11,7 +11,7 @@ jobs:
         with: {go-version-file: core/go.mod, cache-dependency-path: core/go.sum}
       - run: cd core && go test -race ./... && go vet ./...
       - name: Isolated network namespaces, real TUN TCP/UDP and failure recovery
-        run: sudo -E env "PATH=$PATH" V6ONLY_DISPOSABLE_NETWORK=1 bash tests/tunnel-linux.sh
+        run: sudo env "PATH=$PATH" "GITHUB_ACTIONS=$GITHUB_ACTIONS" V6ONLY_DISPOSABLE_NETWORK=1 bash tests/tunnel-linux.sh
 
   syntax-and-logic:
     runs-on: windows-latest
